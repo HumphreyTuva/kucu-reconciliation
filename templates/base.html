@@ -2,6 +2,8 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Treasury Reconciliation{% endblock %} · KUCU</title>
 <meta name="theme-color" content="#28309a"><link rel="icon" href="{% static 'img/favicon.png' %}">
+<link rel="manifest" href="{% url 'manifest' %}"><link rel="apple-touch-icon" href="{% static 'img/icon-192.png' %}">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="KUCU Treasury">
 <link rel="stylesheet" href="{% static 'css/app.css' %}"></head>
 <body>
 <header class="top"><div class="wrap bar">
@@ -20,9 +22,18 @@
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form></div></details>
   {% endwith %}{% endif %}
 </div></header>
+<div class="wrap noprint"><button id="installBtn" class="install" hidden>⬇ Install app</button></div>
 <main class="wrap">
 {% for m in messages %}<div class="msg {{ m.tags }}" role="status">{{ m }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
 <footer class="foot"><div class="wrap"><img src="{% static 'img/seal.png' %}" alt="">Kenyatta University Christian Union · Treasury<br><span class="small">Discipleship, Evangelism, Mission &amp; Leadership Development</span></div></footer>
-</body></html>
+<script>
+if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("{% url 'sw' %}").catch(()=>{}));
+let dp=null;const b=document.getElementById("installBtn");
+const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();dp=e;if(!standalone)b.hidden=false});
+if(/iphone|ipad|ipod/i.test(navigator.userAgent)&&!standalone)b.hidden=false;
+b.addEventListener("click",async()=>{if(dp){dp.prompt();await dp.userChoice;dp=null;b.hidden=true}else alert("To install: tap the Share button, then “Add to Home Screen”.")});
+addEventListener("appinstalled",()=>b.hidden=true);
+</script></body></html>

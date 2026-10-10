@@ -98,3 +98,4 @@ table.ft tr.tot td{font-weight:700;border-top:1px solid #222;border-bottom:0}
 table.ft tr.grand td{font-weight:800;border-top:1px solid #222;border-bottom:3px double #222;padding:10px}
 @media(max-width:720px){.fs{padding:14px}table.ft th,table.ft td{padding:5px 6px;font-size:13px}.yr{width:100%}}
 @media print{.fs{border:0;padding:0}.msg{display:none}}
+.install{margin:12px 0 0;background:var(--brand-l);color:var(--brand);border-color:#c9cef5;padding:8px 14px}.install:hover{background:#dde1f8}.install[hidden]{display:none}

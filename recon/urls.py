@@ -3,6 +3,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("manifest.webmanifest", views.manifest, name="manifest"),
+    path("sw.js", views.service_worker, name="sw"),
+    path("offline/", views.offline, name="offline"),
     path("", views.home, name="home"),
     path("statement/<int:pk>/", views.statement, name="statement"),
     path("statement/<int:pk>/export/", views.export, name="export"),

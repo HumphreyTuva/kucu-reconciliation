@@ -307,3 +307,38 @@ def report_export(request):
         for cell in rw:
             cell.number_format = '#,##0;(#,##0);"-"'
     return _xlsx_response(wb, f"KUCU-financial-report-{y}")
+
+
+# ----------------------------------------------------------------------- PWA
+import json
+
+from django.templatetags.static import static
+from django.views.decorators.cache import never_cache
+
+
+def manifest(request):
+    data = {
+        "name": "KUCU Treasury Reconciliation", "short_name": "KUCU Treasury",
+        "description": "Reconcile bank statements and build the annual financial report.",
+        "start_url": "/", "scope": "/", "display": "standalone",
+        "background_color": "#ffffff", "theme_color": "#28309a",
+        "icons": [
+            {"src": static("img/icon-192.png"), "sizes": "192x192", "type": "image/png"},
+            {"src": static("img/icon-512.png"), "sizes": "512x512", "type": "image/png"},
+            {"src": static("img/icon-maskable-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    return HttpResponse(json.dumps(data), content_type="application/manifest+json")
+
+
+@never_cache
+def service_worker(request):
+    js = render(request, "sw.js", {"css": static("css/app.css"), "logo": static("img/logo-wide.png"),
+                                   "icon": static("img/icon-192.png")}).content
+    resp = HttpResponse(js, content_type="application/javascript")
+    resp["Service-Worker-Allowed"] = "/"
+    return resp
+
+
+def offline(request):
+    return render(request, "offline.html")
