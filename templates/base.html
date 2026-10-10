@@ -1,0 +1,28 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Treasury Reconciliation{% endblock %} · KUCU</title>
+<meta name="theme-color" content="#28309a"><link rel="icon" href="{% static 'img/favicon.png' %}">
+<link rel="stylesheet" href="{% static 'css/app.css' %}"></head>
+<body>
+<header class="top"><div class="wrap bar">
+  <a class="brand" href="{% url 'home' %}" aria-label="KUCU home"><img src="{% static 'img/logo-wide.png' %}" alt="Kenyatta University Christian Union"></a>
+  {% if user.is_authenticated %}{% with u=request.resolver_match.url_name %}
+  <nav class="nav" aria-label="Main">
+    <a href="{% url 'home' %}" class="{% if u == 'home' or u == 'statement' %}on{% endif %}">Statements</a>
+    <a href="{% url 'report' %}" class="{% if u == 'report' %}on{% endif %}">Annual report</a>
+    <a href="{% url 'categories' %}" class="{% if u == 'categories' %}on{% endif %}">Categories</a>
+    {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form>
+  </nav>
+  <details class="menu"><summary aria-label="Menu">☰</summary><div class="panel">
+    <a href="{% url 'home' %}">Statements</a><a href="{% url 'report' %}">Annual report</a><a href="{% url 'categories' %}">Categories</a>
+    {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form></div></details>
+  {% endwith %}{% endif %}
+</div></header>
+<main class="wrap">
+{% for m in messages %}<div class="msg {{ m.tags }}" role="status">{{ m }}</div>{% endfor %}
+{% block content %}{% endblock %}
+</main>
+<footer class="foot"><div class="wrap"><img src="{% static 'img/seal.png' %}" alt="">Kenyatta University Christian Union · Treasury<br><span class="small">Discipleship, Evangelism, Mission &amp; Leadership Development</span></div></footer>
+</body></html>

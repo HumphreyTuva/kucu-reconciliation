@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% load recon_extras %}{% block title %}{{ st.name }}{% endblock %}
+{% block content %}
+<div class="crumb noprint"><a href="{% url 'home' %}">← All statements</a></div>
+<div class="head"><div><h1>{{ st.name }}</h1>{% if start %}<span class="chip">{{ start|date:"j M Y" }} – {{ end|date:"j M Y" }}</span>{% endif %}</div>
+<div class="actions"><a class="btn" href="{% url 'export' st.pk %}">Download Excel</a>
+<button class="ghost" onclick="window.print()">Print</button>
+<form method="post" action="{% url 'recategorise' st.pk %}">{% csrf_token %}<button class="ghost" title="Apply the current category keywords again">Re-run rules</button></form>
+<form method="post" action="{% url 'delete_statement' st.pk %}" onsubmit="return confirm('Delete this statement? This cannot be undone.')">{% csrf_token %}<button class="ghost danger">Delete</button></form></div></div>
+
+<div class="stats">
+<div class="stat key"><small>Total credits (income)</small><b>KES {{ total_credit|floatformat:2 }}</b></div>
+<div class="stat"><small>Total debits</small><b>KES {{ total_debit|floatformat:2 }}</b></div>
+{% if st.opening is not None %}<div class="stat"><small>Opening balance</small><b>{{ st.opening|floatformat:2 }}</b></div>{% endif %}
+{% if st.closing is not None %}<div class="stat"><small>Closing balance</small><b>{{ st.closing|floatformat:2 }}</b></div>{% endif %}
+{% if check is not None %}<div class="stat"><small>Statement check</small>{% if check == 0 %}<span class="pill ok">Balanced ✓</span>{% else %}<span class="pill bad">Off by {{ check|floatformat:2 }}</span>{% endif %}</div>{% endif %}
+</div>
+
+<div class="card"><div class="hd"><h2>Income by category</h2><span class="mute small noprint">Click a category to see its transactions</span></div>
+{% if income %}<div class="scroll"><table class="stack"><thead><tr><th>Category</th><th class="n">Transactions</th><th class="n">Amount (KES)</th><th>Share</th></tr></thead><tbody>
+{% for l in income %}<tr class="{% if flt == l.key %}sel{% endif %}"><td class="cat" data-label="Category"><a href="?cat={{ l.key }}#tx">{{ l.name }}</a>{% if l.warn %} <span class="pill warn">Review</span>{% endif %}</td>
+<td class="n" data-label="Transactions">{{ l.n }}</td><td class="n" data-label="Amount">{{ l.total|floatformat:2 }}</td><td class="bar-c"><div class="bar-t"><i style="width:{{ l.pct|floatformat:1 }}%"></i></div></td></tr>{% endfor %}
+</tbody><tfoot><tr><td data-label="">Total income</td><td></td><td class="n" data-label="Amount">{{ total_credit|floatformat:2 }}</td><td class="bar-c"></td></tr></tfoot></table></div>
+{% else %}<div class="empty">No credits in this statement.</div>{% endif %}</div>
+
+<div class="card"><div class="hd"><h2>Expenses by category</h2></div>
+{% if expense %}<div class="scroll"><table class="stack"><thead><tr><th>Category</th><th class="n">Transactions</th><th class="n">Amount (KES)</th><th>Share</th></tr></thead><tbody>
+{% for l in expense %}<tr class="{% if flt == l.key %}sel{% endif %}"><td class="cat" data-label="Category"><a href="?cat={{ l.key }}#tx">{{ l.name }}</a>{% if l.warn %} <span class="pill warn">Review</span>{% endif %}</td>
+<td class="n" data-label="Transactions">{{ l.n }}</td><td class="n" data-label="Amount">{{ l.total|floatformat:2 }}</td><td class="bar-c"><div class="bar-t red"><i style="width:{{ l.pct|floatformat:1 }}%"></i></div></td></tr>{% endfor %}
+</tbody><tfoot><tr><td data-label="">Total expenses</td><td></td><td class="n" data-label="Amount">{{ total_debit|floatformat:2 }}</td><td class="bar-c"></td></tr></tfoot></table></div>
+{% else %}<div class="empty">No debits in this statement.</div>{% endif %}</div>
+
+<div class="card" id="tx"><div class="hd"><h2>Transactions{% if flt %} · filtered{% endif %}</h2>{% if flt %}<a class="btn ghost noprint" href="?#tx">Show all</a>{% endif %}</div>
+<p class="sub noprint small">Misspellings such as “ofering” are corrected automatically. Change any category with the dropdown; it is saved straight away and kept when rules are re-run.</p>
+{% if txs %}<div class="scroll"><table class="stack"><thead><tr><th>Date</th><th>Details</th><th class="n">Debit</th><th class="n">Credit</th><th>Category</th></tr></thead><tbody>
+{% for t in txs %}<tr><td data-label="Date">{{ t.date|date:"j M Y" }}</td><td class="desc" data-label="Details" title="{{ t.description }}">{{ t.short_description }}</td>
+<td class="n" data-label="Debit">{% if t.debit %}{{ t.debit|floatformat:2 }}{% else %}–{% endif %}</td><td class="n" data-label="Credit">{% if t.credit %}{{ t.credit|floatformat:2 }}{% else %}–{% endif %}</td>
+<td data-label="Category"><form method="post" action="{% url 'set_category' t.pk %}">{% csrf_token %}<input type="hidden" name="cat" value="{{ flt }}">
+<select name="category" aria-label="Category" onchange="this.form.submit()"><option value="">Uncategorised</option>
+{% if t.credit %}{% for label, cs in income_groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if t.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}
+{% else %}{% for label, cs in expense_groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if t.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}{% endif %}
+</select></form>{% if t.note %}<div class="flag small">{{ t.note }}</div>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty">No transactions in this view.</div>{% endif %}</div>
+{% endblock %}

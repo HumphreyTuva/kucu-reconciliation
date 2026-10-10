@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Categories{% endblock %}
+{% block content %}<h1>Categories and keywords</h1>
+<p class="sub">Each payment is placed in the first category (lowest order) whose keyword it contains. Plurals and common misspellings such as <i>ofering</i> or <i>tithes</i> are recognised automatically, and
+<b>Tithe/Offering</b> written together counts as <b>Offering</b> because Offering is checked first. Income sections apply to money received, expense sections to money paid out. The section decides where the category appears in the annual report.</p>
+<form method="post" class="card rules">{% csrf_token %}{{ formset.management_form }}{{ formset.non_form_errors }}
+<div class="scroll"><table class="stack"><thead><tr><th>Report section</th><th style="width:80px">Order</th><th>Name</th><th>Keywords</th><th>Active</th><th>Remove</th></tr></thead><tbody>
+{% for f in formset %}<tr>{{ f.id }}<td data-label="Section">{{ f.section }}</td><td data-label="Order">{{ f.order }}</td><td data-label="Name">{{ f.name }}{{ f.name.errors }}</td><td data-label="Keywords">{{ f.keywords }}{{ f.keywords.errors }}</td><td data-label="Active">{{ f.is_active }}</td><td data-label="Remove">{% if f.instance.pk %}{{ f.DELETE }}{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="mute small">The empty rows at the bottom add new categories.</p>
+<button>Save categories</button></form>{% endblock %}
