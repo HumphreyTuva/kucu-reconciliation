@@ -40,18 +40,40 @@ def to_date(v):
     return None
 
 
-def _sheets(upload, password=""):
-    name = upload.name.lower()
-    data = upload.read()
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # password-protected .xlsx files are stored in this container
+
+
+def _open_protected_office(data, password):
+    if not data.startswith(OLE_MAGIC):
+        return data  # not encrypted (sheet protection, which only blocks editing, opens fine)
+    try:
+        import msoffcrypto
+    except ImportError:
+        raise StatementError("Protected Excel support is not installed on the server (pip install msoffcrypto-tool).")
+    if not password:
+        raise StatementError("This Excel file is password-protected. Enter its password in the password box and upload again.")
+    try:
+        office = msoffcrypto.OfficeFile(io.BytesIO(data))
+        office.load_key(password=password)
+        out = io.BytesIO()
+        office.decrypt(out)
+        return out.getvalue()
+    except Exception:
+        raise StatementError("The Excel password was not accepted.")
+
+
+def _sheets(name, data, password=""):
     if name.endswith(".csv"):
         text = data.decode("utf-8-sig", errors="replace")
         yield [list(r) for r in csv.reader(io.StringIO(text))]
     elif name.endswith((".xlsx", ".xlsm")):
-        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+        data = _open_protected_office(data, password)
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+        except Exception:
+            raise StatementError("This Excel file could not be read. Is it damaged, or an old .xls saved with the wrong extension?")
         for ws in wb.worksheets:
             yield [list(r) for r in ws.iter_rows(values_only=True)]
-    elif name.endswith(".pdf"):
-        yield _pdf_rows(data, password)
     else:
         raise StatementError("Please upload an .xlsx, .csv or .pdf file (save .xls files as .xlsx first).")
 
@@ -61,8 +83,9 @@ HEAD_DESC = r"details|description|narrat|particular"
 HEAD_DATE = r"transaction date|trans\.? ?date|posting date|^date"
 
 
-def _pdf_rows(data, password):
-    """Read the tables of a (possibly password-protected) bank statement PDF into sheet-style rows."""
+def _pdf_sheets(data, password):
+    """Yield readings of a (possibly password-protected) bank statement PDF: first from word positions (fast and
+    exact for wrapped descriptions), then from ruled tables. parse_statement stops at the first that reconciles."""
     try:
         import pdfplumber
     except ImportError:
@@ -75,14 +98,16 @@ def _pdf_rows(data, password):
             raise StatementError("The PDF password was not accepted." if password else
                                  "This PDF is password-protected. Enter its password in the password box and upload again.")
         raise StatementError("This PDF could not be read. Is it a scanned image or a damaged file?")
-    rows = []
     with pdf:
+        words = _words_rows(pdf)
+        if words:
+            yield words
+        tables = []
         for page in pdf.pages:
             for t in page.extract_tables():  # tables drawn with ruled lines
-                rows.extend([[(c or "").strip() for c in r] for r in t])
-        if not any(_is_header(r) for r in rows):  # no ruled lines: rebuild the table from word positions
-            rows = _words_rows(pdf)
-    return _merge_wrapped(rows)
+                tables.extend([[(c or "").strip() for c in r] for r in t])
+        if tables:
+            yield tables
 
 
 def _is_header(r):
@@ -90,7 +115,7 @@ def _is_header(r):
 
 
 NUM = re.compile(r"^-?[\d,]+\.\d{2}$")
-DATE = re.compile(r"^\d{1,2}[-/ ][A-Za-z0-9]{1,3}[-/ ]\d{2,4}$")
+DATE = re.compile(r"\b\d{1,2}[-/. ](?:\d{1,2}|[A-Za-z]{3,9})[-/. ]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b")
 AMT_HEAD = re.compile("debit|credit|balance", re.I)
 
 
@@ -121,6 +146,11 @@ def _words_rows(pdf):
                             cols[-1].update(text=cols[-1]["text"] + " " + w["text"], x1=w["x1"])
                         else:
                             cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
+                    if not any(re.search(HEAD_DESC, c["text"], re.I) for c in cols):  # header wrapped onto two lines
+                        for w in (w for pl in lines for w in pl if l[0]["top"] - 16 <= w["top"] < l[0]["top"] - 1):
+                            if re.fullmatch(HEAD_DESC, w["text"].lower()):
+                                cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
+                        cols.sort(key=lambda c: c["x0"])
                     rows.append([c["text"] for c in cols])
                     top = l[0]["top"]
                     break
@@ -139,13 +169,14 @@ def _words_rows(pdf):
                     idx = i
             return idx
 
+        dcol = next((i for i, c in enumerate(cols) if re.search(HEAD_DATE, c["text"], re.I)), 0)
         anchors = []
         loose = []
         for l in lines:
             t = [w["text"].lower() for w in l]
             if l[0]["top"] <= top or ("debit" in t and "credit" in t):
                 continue
-            if DATE.match(l[0]["text"]):
+            if DATE.search(" ".join(w["text"] for w in l if col_of(w) == dcol)):
                 anchors.append({"top": l[0]["top"], "words": list(l)})
             else:
                 loose.append(l)
@@ -161,30 +192,20 @@ def _words_rows(pdf):
     return rows
 
 
-def _merge_wrapped(rows):
-    """Long descriptions wrap onto extra lines in PDFs; glue those lines back onto the transaction above."""
-    hi = next((i for i, r in enumerate(rows) if any(re.search(HEAD_DESC, c, re.I) for c in r)
-               and any(re.search("credit", c, re.I) for c in r)), None)
-    if hi is None:
-        return rows
-    head = [c.lower() for c in rows[hi]]
-    col = lambda rx: next((i for i, h in enumerate(head) if re.search(rx, h)), None)
-    c_desc, c_deb, c_cr, c_dt = col(HEAD_DESC), col("debit"), col("credit"), col(HEAD_DATE)
-    out, prev = rows[:hi + 1], None
-    cell = lambda r, i: r[i] if i is not None and i < len(r) else ""
-    for r in rows[hi + 1:]:
-        if not cell(r, c_dt) and not cell(r, c_deb) and not cell(r, c_cr) and cell(r, c_desc) and prev is not None:
-            prev[c_desc] = f"{prev[c_desc]} {cell(r, c_desc)}".strip()
-            continue
-        out.append(r)
-        prev = r
-    return out
+PENNY = Decimal("0.01")
 
 
-def parse_statement(upload, password=""):
-    """Return (rows, opening, closing). rows: dicts of date/description/debit/credit."""
-    rows, opening, closing, found = [], None, None, False
-    for sheet in _sheets(upload, password):
+def _parse_sheets(sheets):
+    """Read transactions from sheet-style rows.
+
+    * Money in or out is decided from the running balance, not from which column the amount sits in:
+      converters such as iLovePDF sometimes put credits under Debit on alternate pages, but the
+      balance column stays right.
+    * Rows with only a description are wrapped text; they are joined to the transaction above
+      (text at the very top of a page belongs to the last transaction of the page before).
+    """
+    rows, opening, closing, found, prev_bal = [], None, None, False, None
+    for sheet in sheets:
         hi = next((i for i, r in enumerate(sheet)
                    if any(re.search(HEAD_DESC, str(c or ""), re.I) for c in r)
                    and any(re.search(r"credit", str(c or ""), re.I) for c in r)), None)
@@ -196,20 +217,67 @@ def parse_statement(upload, password=""):
         c_dt, c_bal = col(HEAD_DATE), col(r"balance")
         found = True
         get = lambda r, i: r[i] if i is not None and i < len(r) else None
+        first_on_page = True
         for r in sheet[hi + 1:]:
-            desc = re.sub(r"\s+", " ", str(get(r, c_desc) or "")).strip()
-            if not desc or re.match(r"total", desc, re.I):
+            if not any(str(c or "").strip() for c in r):  # blank row = page break
+                first_on_page = True
                 continue
+            raw_desc = str(get(r, c_desc) or "").strip()
+            desc = re.sub(r"\s+", " ", raw_desc).strip()
+            if not desc or re.match(r"total|cleared balance|kindly|page \d", desc, re.I):
+                continue
+            raw_bal = get(r, c_bal)
+            has_bal = raw_bal not in (None, "") and re.search(r"\d", str(raw_bal)) is not None
+            bal = to_dec(raw_bal) if has_bal else None
             if re.search(r"b/?fwd|brought forward|opening balance", desc, re.I):
-                bal = to_dec(get(r, c_bal)) or to_dec(get(r, c_cr))
-                opening = bal
+                opening = bal if bal is not None else to_dec(get(r, c_cr))
+                prev_bal = opening
                 continue
             cr, db = to_dec(get(r, c_cr)), to_dec(get(r, c_deb))
             if not cr and not db:
+                if not has_bal and rows and not to_date(get(r, 0)) and not str(get(r, 0) or "").strip():
+                    rows[-1]["description"] += " " + desc  # wrapped text of the transaction above
                 continue
-            if c_bal is not None and get(r, c_bal) not in (None, ""):
-                closing = to_dec(get(r, c_bal))
+            lines = [l.strip() for l in raw_desc.splitlines() if l.strip()]
+            if first_on_page and rows and len(lines) > 1:
+                # the last line is this row's own first line; earlier ones spilled over from the page before
+                k = next((i for i, l in enumerate(lines) if re.match(r"transfer in from acc", l, re.I)), 0)
+                if k > 0:
+                    rows[-1]["description"] += " " + " ".join(lines[:k])
+                    desc = re.sub(r"\s+", " ", " ".join(lines[k:])).strip()
+            first_on_page = False
+            amount = cr or db
+            if bal is not None and prev_bal is not None:
+                delta = bal - prev_bal
+                if abs(abs(delta) - amount) <= PENNY:  # direction from the balance, whatever column it was in
+                    cr, db = (amount, Decimal("0")) if delta > 0 else (Decimal("0"), amount)
+            if bal is not None:
+                prev_bal = closing = bal
             rows.append({"date": to_date(get(r, c_dt)), "description": desc, "debit": db, "credit": cr})
+    return rows, opening, closing, found
+
+
+def parse_statement(upload, password=""):
+    """Return (rows, opening, closing). rows: dicts of date/description/debit/credit."""
+    name, data = upload.name.lower(), upload.read()
+    if name.endswith(".pdf"):
+        best, found = None, False
+        for sheet in _pdf_sheets(data, password):
+            rows, opening, closing, f = _parse_sheets([sheet])
+            found = found or f
+            if rows:
+                balanced = (opening is not None and closing is not None and
+                            opening + sum(r["credit"] for r in rows) - sum(r["debit"] for r in rows) == closing)
+                if best is None or (balanced, len(rows)) > best[0]:
+                    best = ((balanced, len(rows)), rows, opening, closing)
+                if balanced:
+                    break  # this reading reconciles with the bank's own balances
+        if best:
+            return best[1], best[2], best[3]
+        if found:
+            raise StatementError("The PDF's columns were found but no transactions could be read from it. Its layout may not be supported yet.")
+        raise StatementError("Could not find Transaction Details / Debit / Credit columns in this PDF.")
+    rows, opening, closing, found = _parse_sheets(_sheets(name, data, password))
     if not found:
         raise StatementError("Could not find Transaction Details / Debit / Credit columns in this file.")
     if not rows:
@@ -229,7 +297,15 @@ def _sim(a, b):
 
 
 def _words(description):
-    return [t for t in re.findall(r"[a-z0-9]+", description.lower()) if t.isalpha()]
+    out = []
+    for t in re.findall(r"[a-z0-9]+", description.lower()):
+        if t.isalpha():
+            out.append(t)
+            continue
+        out += [x for x in re.findall(r"[a-z]+", t) if len(x) >= 5]  # Tithe500, 50Offering
+        if t.replace("0", "o").isalpha():  # 0ffering typed with a zero
+            out.append(t.replace("0", "o"))
+    return out
 
 
 def _candidates(words):

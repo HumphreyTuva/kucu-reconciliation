@@ -43,6 +43,11 @@ def home(request):
                 st = Statement.objects.create(name=f.name, opening=opening, closing=closing)
                 import_statement(st, rows)
                 made.append(st)
+                if opening is not None and closing is not None:
+                    gap = opening + sum(r["credit"] for r in rows) - sum(r["debit"] for r in rows) - closing
+                    if gap != 0:
+                        messages.warning(request, f"{f.name}: the totals do not balance (off by {gap:,.2f}), so some transactions may have been misread. "
+                                                  "If this is a PDF, try the Excel version of the statement and compare.")
                 seen = set(Transaction.objects.exclude(statement=st).values_list("date", "description", "debit", "credit"))
                 dups = sum(1 for t in st.transactions.all() if (t.date, t.description, t.debit, t.credit) in seen)
                 if dups:

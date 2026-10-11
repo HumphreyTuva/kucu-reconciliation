@@ -2,13 +2,13 @@
 {% block content %}
 <section class="hero"><img src="{% static 'img/seal.png' %}" alt="">
 <div><h1>Reconcile a bank statement</h1><p>Upload the monthly statement and get Tithe, Offering, Kucu care and every other total in seconds.</p></div></section>
-<div class="steps"><div class="step"><div><b>Upload</b><span>Excel, CSV or PDF from the bank, including password-protected PDFs</span></div></div>
+<div class="steps"><div class="step"><div><b>Upload</b><span>Excel, CSV or PDF from the bank, including password-protected files</span></div></div>
 <div class="step"><div><b>Review</b><span>Check totals and fix any uncategorised items</span></div></div>
 <div class="step"><div><b>Download</b><span>Export the summary to Excel or print</span></div></div></div>
 <form class="card" method="post" enctype="multipart/form-data" id="up">{% csrf_token %}
 <label class="drop" id="drop" for="{{ form.file.id_for_label }}"><div class="ic">⬆</div><b>Choose statements</b> or drop them here
 <div class="mute small">.xlsx, .csv or .pdf · you can select several months at once</div><div class="fn" id="fn"></div>{{ form.file }}</label>
-<div class="pw"><label for="{{ form.pdf_password.id_for_label }}">{{ form.pdf_password.label }}</label>{{ form.pdf_password }}<span class="mute small">Used only to open the PDF. It is never stored.</span></div>
+<div class="pw"><label for="{{ form.pdf_password.id_for_label }}">{{ form.pdf_password.label }}</label>{{ form.pdf_password }}<span class="mute small">Used only to open the file. It is never stored.</span></div>
 <div class="upload-actions"><button id="go" disabled>Reconcile</button></div></form>
 <div class="card"><div class="hd"><h2>Previous statements</h2></div>
 {% if statements %}<ul class="list">{% for s in statements %}<li><a href="{% url 'statement' s.pk %}"><span><span class="nm">{{ s.name }}</span><br><span class="mute small">{% if s.first %}{{ s.first|date:"j M Y" }} – {{ s.last|date:"j M Y" }} · {% endif %}uploaded {{ s.uploaded_at|date:"j M Y" }}</span></span><span class="go">View →</span></a></li>{% endfor %}</ul>
