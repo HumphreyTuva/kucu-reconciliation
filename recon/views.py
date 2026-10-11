@@ -36,7 +36,7 @@ def home(request):
             made = []
             for f in form.cleaned_data["file"]:
                 try:
-                    rows, opening, closing = parse_statement(f)
+                    rows, opening, closing = parse_statement(f, form.cleaned_data.get("pdf_password", ""))
                 except StatementError as e:
                     messages.error(request, f"{f.name}: {e}")
                     continue
@@ -323,9 +323,9 @@ def manifest(request):
         "start_url": "/", "scope": "/", "display": "standalone",
         "background_color": "#ffffff", "theme_color": "#28309a",
         "icons": [
-            {"src": static("img/icon-192.png"), "sizes": "192x192", "type": "image/png"},
-            {"src": static("img/icon-512.png"), "sizes": "512x512", "type": "image/png"},
-            {"src": static("img/icon-maskable-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            {"src": static("img/icon-192.png") + "?v=2", "sizes": "192x192", "type": "image/png"},
+            {"src": static("img/icon-512.png") + "?v=2", "sizes": "512x512", "type": "image/png"},
+            {"src": static("img/icon-maskable-512.png") + "?v=2", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
         ],
     }
     return HttpResponse(json.dumps(data), content_type="application/manifest+json")
@@ -334,7 +334,7 @@ def manifest(request):
 @never_cache
 def service_worker(request):
     js = render(request, "sw.js", {"css": static("css/app.css"), "logo": static("img/logo-wide.png"),
-                                   "icon": static("img/icon-192.png")}).content
+                                   "icon": static("img/icon-192.png") + "?v=2"}).content
     resp = HttpResponse(js, content_type="application/javascript")
     resp["Service-Worker-Allowed"] = "/"
     return resp

@@ -17,7 +17,9 @@ class MultipleFileField(forms.FileField):
 
 
 class UploadForm(forms.Form):
-    file = MultipleFileField(label="Bank statements (.xlsx or .csv)")
+    file = MultipleFileField(label="Bank statements (.xlsx, .csv or .pdf)")
+    pdf_password = forms.CharField(required=False, label="PDF password (if protected)",
+                                   widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "off", "placeholder": "Only needed for protected PDFs"}))
 
 
 CategoryFormSet = modelformset_factory(

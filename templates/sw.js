@@ -1,5 +1,5 @@
 // Caches only static assets and the offline page. Pages with financial data are never cached.
-const CACHE = "kucu-v1";
+const CACHE = "kucu-v2";
 const ASSETS = ["/offline/", "{{ css }}", "{{ logo }}", "{{ icon }}"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
