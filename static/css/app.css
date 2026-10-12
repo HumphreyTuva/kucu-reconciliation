@@ -101,3 +101,19 @@ table.ft tr.grand td{font-weight:800;border-top:1px solid #222;border-bottom:3px
 .install{margin:12px 0 0;background:var(--brand-l);color:var(--brand);border-color:#c9cef5;padding:8px 14px}.install:hover{background:#dde1f8}.install[hidden]{display:none}
 .pw{margin-top:14px;display:grid;gap:4px;max-width:360px}
 .pager{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+/* support */
+.sup-hero{background:#000;color:#fff;border-radius:var(--r);padding:28px;margin-bottom:20px;display:flex;gap:28px;align-items:center;box-shadow:var(--sh)}
+.sup-hero img{width:240px;max-width:42%;height:auto;flex:none}.sup-hero h1{color:#fff}.sup-hero p{margin:0;opacity:.85}
+.contacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px}
+.ccard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);padding:18px;text-decoration:none;color:var(--ink);display:grid;gap:2px;transition:.15s}
+.ccard:hover{border-color:var(--brand);transform:translateY(-1px)}.ccard .ci{font-size:26px}.ccard b{font-size:16px}.ccard span:last-child{color:var(--brand);font-weight:600;word-break:break-all}
+.ccard.wa:hover{border-color:#1faa59}
+.hf{display:grid;grid-template-columns:1fr 1fr;gap:14px}.hf .full{grid-column:1/-1}.hf label{display:block;margin-bottom:4px}
+textarea{font:inherit;color:var(--ink);background:#fff;border:1px solid #cdd2e3;border-radius:9px;padding:9px 11px;width:100%;resize:vertical}
+textarea:focus{border-color:var(--brand)}
+.faq{border-bottom:1px solid var(--line);padding:2px 0}.faq:last-child{border:0}.faq summary{cursor:pointer;font-weight:600;padding:12px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+.faq summary::-webkit-details-marker{display:none}.faq summary::after{content:"+";color:var(--brand);font-size:20px;line-height:1}.faq[open] summary::after{content:"–"}.faq p{margin:0 0 14px;color:var(--mute)}
+.foot .by{margin-top:12px;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+.foot .tl{background:#000;border-radius:8px;padding:4px 10px;display:inline-flex}.foot .tl img{height:26px;margin:0;vertical-align:middle}
+@media(max-width:720px){.sup-hero{flex-direction:column;text-align:center;padding:22px}.sup-hero img{max-width:70%}.hf{grid-template-columns:1fr}}
+@media print{.sup-hero,.contacts{display:none}}

@@ -13,21 +13,24 @@
     <a href="{% url 'home' %}" class="{% if u == 'home' or u == 'statement' %}on{% endif %}">Statements</a>
     <a href="{% url 'report' %}" class="{% if u == 'report' %}on{% endif %}">Annual report</a>
     <a href="{% url 'categories' %}" class="{% if u == 'categories' %}on{% endif %}">Categories</a>
+    <a href="{% url 'support' %}" class="{% if u == 'support' %}on{% endif %}">Support</a>
     {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form>
   </nav>
   <details class="menu"><summary aria-label="Menu">☰</summary><div class="panel">
-    <a href="{% url 'home' %}">Statements</a><a href="{% url 'report' %}">Annual report</a><a href="{% url 'categories' %}">Categories</a>
+    <a href="{% url 'home' %}">Statements</a><a href="{% url 'report' %}">Annual report</a><a href="{% url 'categories' %}">Categories</a><a href="{% url 'support' %}">Support</a>
     {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form></div></details>
-  {% endwith %}{% endif %}
+  {% endwith %}{% else %}<nav class="nav"><a href="{% url 'support' %}">Support</a></nav>{% endif %}
 </div></header>
 <div class="wrap noprint"><button id="installBtn" class="install" hidden>⬇ Install app</button></div>
 <main class="wrap">
 {% for m in messages %}<div class="msg {{ m.tags }}" role="status">{{ m }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
-<footer class="foot"><div class="wrap"><img src="{% static 'img/seal.png' %}" alt="">Kenyatta University Christian Union · Treasury<br><span class="small">Discipleship, Evangelism, Mission &amp; Leadership Development</span></div></footer>
+<footer class="foot"><div class="wrap"><img src="{% static 'img/seal.png' %}" alt="">Kenyatta University Christian Union · Treasury<br><span class="small">Discipleship, Evangelism, Mission &amp; Leadership Development</span>
+<div class="by noprint"><a href="{% url 'support' %}" class="tl" aria-label="Tuva Labs support"><img src="{% static 'img/tuvalabs-logo.png' %}" alt="Tuva Labs"></a>
+<span class="small">Built and supported by Tuva Labs · <a href="{% url 'support' %}">Get help</a></span></div></div></footer>
 <script>
 if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("{% url 'sw' %}").catch(()=>{}));
 let dp=null;const b=document.getElementById("installBtn");

@@ -353,3 +353,9 @@ def service_worker(request):
 
 def offline(request):
     return render(request, "offline.html")
+
+
+# ------------------------------------------------------------------- support
+def support(request):
+    """Public page, so people who cannot log in can still reach support."""
+    return render(request, "recon/support.html", {"phone": "+254113631232", "wa": "254113631232", "email": "tuvalabs@gmail.com"})

@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% load static %}{% block title %}Support{% endblock %}
+{% block content %}
+<section class="sup-hero"><img src="{% static 'img/tuvalabs-logo.png' %}" alt="Tuva Labs">
+<div><h1>We are here to help</h1><p>Something not working, or a statement that will not reconcile? Reach Tuva Labs by call, WhatsApp or email.</p></div></section>
+
+<div class="contacts">
+  <a class="ccard" href="tel:{{ phone }}"><span class="ci">📞</span><b>Call us</b><span>{{ phone }}</span></a>
+  <a class="ccard wa" href="https://wa.me/{{ wa }}?text=Hello%20Tuva%20Labs%2C%20I%20need%20help%20with%20the%20KUCU%20Treasury%20system." target="_blank" rel="noopener"><span class="ci">💬</span><b>WhatsApp</b><span>{{ phone }}</span></a>
+  <a class="ccard" href="mailto:{{ email }}?subject=KUCU%20Treasury%20support"><span class="ci">✉️</span><b>Email</b><span>{{ email }}</span></a>
+</div>
+
+<div class="card"><div class="hd"><h2>Describe your problem</h2></div>
+<p class="sub small">Fill this in and we will write the message for you. Nothing is stored on this site.</p>
+<form id="helpForm" class="hf">
+<div><label for="hn">Your name</label><input type="text" id="hn" autocomplete="name"></div>
+<div><label for="ht">What do you need help with?</label><select id="ht">
+<option>Cannot log in</option><option>A file will not upload or open</option><option>Totals do not balance</option>
+<option>Payments are in the wrong category</option><option>The annual report looks wrong</option><option>Other</option></select></div>
+<div class="full"><label for="hd">Details</label><textarea id="hd" rows="4" placeholder="Which file or month, and what you see on the screen"></textarea></div>
+<div class="full row"><button type="button" id="sendWa">Send on WhatsApp</button><button type="button" class="ghost" id="sendMail">Send by email</button></div>
+</form>
+<p class="small mute" style="margin:12px 0 0">Please <b>never send your password</b> or a file password in a message. Attach a screenshot, and only send a bank statement if we ask for it, because it contains members&rsquo; details.</p></div>
+
+<div class="card"><div class="hd"><h2>Quick answers</h2></div>
+<details class="faq"><summary>A protected PDF or Excel file will not open</summary><p>Type the file&rsquo;s password in the <b>File password</b> box on the Statements page, then upload. The password is used only to open the file and is never saved. If you upload several files at once they must share one password, so upload files with different passwords separately.</p></details>
+<details class="faq"><summary>It says the totals do not balance</summary><p>The opening balance plus credits minus debits should equal the closing balance. If it does not, some rows were misread. Try the Excel version of the statement instead of the PDF, or contact us with the month and file type.</p></details>
+<details class="faq"><summary>Many payments are &ldquo;Uncategorised&rdquo;</summary><p>These payments have a name or number but no keyword such as Tithe or Offering. Choose the right category from the dropdown beside each one. To catch them automatically next time, add the word under <b>Categories</b>, then open the statement and press <b>Re-run rules</b>.</p></details>
+<details class="faq"><summary>Uploading a big statement takes a long time</summary><p>A full year can take around a minute. Keep the page open until it finishes.</p></details>
+<details class="faq"><summary>The annual report is missing expenses</summary><p>The report is built from bank transactions. Cash withdrawals and cheques need a category, and items that never touch the bank, such as depreciation, are added as manual report entries in Admin.</p></details>
+<details class="faq"><summary>How do I install the app on my phone?</summary><p>Press <b>Install app</b> at the top of the page. On an iPhone, tap Share, then <b>Add to Home Screen</b>.</p></details>
+<details class="faq"><summary>I forgot my password</summary><p>Contact us and we will reset it for you.</p></details></div>
+
+<script>
+(function(){
+ const $=id=>document.getElementById(id);
+ function msg(){return "Hello Tuva Labs, I need help with the KUCU Treasury system.\n\nName: "+($("hn").value||"-")+"\nProblem: "+$("ht").value+"\nDetails: "+($("hd").value||"-")}
+ $("sendWa").onclick=()=>window.open("https://wa.me/{{ wa }}?text="+encodeURIComponent(msg()),"_blank","noopener");
+ $("sendMail").onclick=()=>{location.href="mailto:{{ email }}?subject="+encodeURIComponent("KUCU Treasury support: "+$("ht").value)+"&body="+encodeURIComponent(msg())};
+})();
+</script>
+{% endblock %}
