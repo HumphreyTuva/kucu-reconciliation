@@ -129,33 +129,37 @@ def _lines(words):
     return [sorted(l, key=lambda w: w["x0"]) for l in out]
 
 
+def _is_head_line(l):
+    t = [w["text"].lower() for w in l]
+    return "debit" in t and "credit" in t
+
+
 def _words_rows(pdf):
-    """Fallback for PDFs without ruled lines: place each word in a column using the header's x-positions,
-    start a transaction at every line that begins with a date, and attach wrapped lines to the nearest one."""
-    cols, rows = None, []
+    """Rebuild the transaction table from word positions: place each word in a column using the header's
+    x-positions, start a transaction at every line that begins with a date, and attach the wrapped
+    description lines. The layout is learned from the statement itself:
+      * "below": the first row sits right under the header, so wrapped lines lie under their dated line
+        (they continue the transaction above, even across a page break);
+      * "nearest": wrapped lines sit around the dated line (vertically centred cells)."""
+    cols, anchors, policy, last = None, [], None, None
     for page in pdf.pages:
         lines = _lines(page.extract_words())
-        top = -1
+        hi = next((k for k, l in enumerate(lines) if _is_head_line(l)), None)
         if cols is None:
-            for l in lines:
-                t = [w["text"].lower() for w in l]
-                if "debit" in t and "credit" in t:
-                    cols = []
-                    for w in l:
-                        if cols and w["x0"] - cols[-1]["x1"] <= 9:
-                            cols[-1].update(text=cols[-1]["text"] + " " + w["text"], x1=w["x1"])
-                        else:
-                            cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
-                    if not any(re.search(HEAD_DESC, c["text"], re.I) for c in cols):  # header wrapped onto two lines
-                        for w in (w for pl in lines for w in pl if l[0]["top"] - 16 <= w["top"] < l[0]["top"] - 1):
-                            if re.fullmatch(HEAD_DESC, w["text"].lower()):
-                                cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
-                        cols.sort(key=lambda c: c["x0"])
-                    rows.append([c["text"] for c in cols])
-                    top = l[0]["top"]
-                    break
-            if cols is None:
+            if hi is None:
                 continue
+            l = lines[hi]
+            cols = []
+            for w in l:
+                if cols and w["x0"] - cols[-1]["x1"] <= 9:
+                    cols[-1].update(text=cols[-1]["text"] + " " + w["text"], x1=w["x1"])
+                else:
+                    cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
+            if not any(re.search(HEAD_DESC, c["text"], re.I) for c in cols):  # header wrapped onto two lines
+                for w in (w for pl in lines for w in pl if l[0]["top"] - 16 <= w["top"] < l[0]["top"] - 1):
+                    if re.fullmatch(HEAD_DESC, w["text"].lower()):
+                        cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
+                cols.sort(key=lambda c: c["x0"])
 
         def col_of(w):
             if NUM.match(w["text"]):
@@ -170,25 +174,58 @@ def _words_rows(pdf):
             return idx
 
         dcol = next((i for i, c in enumerate(cols) if re.search(HEAD_DATE, c["text"], re.I)), 0)
-        anchors = []
-        loose = []
-        for l in lines:
-            t = [w["text"].lower() for w in l]
-            if l[0]["top"] <= top or ("debit" in t and "credit" in t):
+        is_anchor = lambda l: bool(DATE.search(" ".join(w["text"] for w in l if col_of(w) == dcol)))
+        body = [l for k, l in enumerate(lines) if (hi is None or k > hi) and not _is_head_line(l)]
+        head_bottom = lines[hi][0]["top"] if hi is not None else None
+        while body and head_bottom is not None and all(re.fullmatch(r"(date|dates|value|transaction|ref|no\.?|\(?kes\)?|amount)", w["text"].lower()) for w in body[0]):
+            head_bottom = body.pop(0)[0]["top"]  # second line of a wrapped header, e.g. "Date  Date"
+        if policy is None:
+            first = next((k for k, l in enumerate(body) if is_anchor(l)), None)
+            if first is None:
                 continue
-            if DATE.search(" ".join(w["text"] for w in l if col_of(w) == dcol)):
-                anchors.append({"top": l[0]["top"], "words": list(l)})
+            policy = "below" if first == 0 else "nearest"
+        if policy == "below":
+            cur = last
+            prev_top = head_bottom
+            for l in body:
+                if is_anchor(l):
+                    last = cur = {"top": l[0]["top"], "words": list(l)}
+                    anchors.append(cur)
+                    prev_top = l[0]["top"]
+                elif (cur is not None and prev_top is not None and l[0]["top"] - prev_top <= 16
+                      and not any(NUM.match(w["text"]) and AMT_HEAD.search(cols[col_of(w)]["text"]) for w in l)
+                      and not re.match(r"total|cleared|effects|book balance|kindly", l[0]["text"], re.I)):
+                    cur["words"].extend(l)  # still part of the transaction above
+                    prev_top = l[0]["top"]
+                else:
+                    cur = None  # a gap: footer or page text, not part of any transaction
+        else:
+            page_anchors = [{"top": l[0]["top"], "words": list(l)} for l in body if is_anchor(l)]
+            for l in body:
+                if is_anchor(l):
+                    continue
+                near = min(page_anchors, key=lambda a: abs(a["top"] - l[0]["top"]), default=None)
+                if near is not None and abs(near["top"] - l[0]["top"]) <= 22:
+                    near["words"].extend(l)
+            anchors.extend(page_anchors)
+    if cols is None:
+        return []
+    rows = [[c["text"] for c in cols]]
+    for a in anchors:
+        cells = [[] for _ in cols]
+        for w in sorted(a["words"], key=lambda w: (round(w["top"] / 3), w["x0"])):
+            # col_of needs the page-independent header positions, which are fixed for the whole statement
+            idx = 0
+            if NUM.match(w["text"]):
+                nums = [i for i, c in enumerate(cols) if AMT_HEAD.search(c["text"])]
+                idx = min(nums, key=lambda i: min(abs(w["x1"] - cols[i]["x1"]),
+                                                  abs((w["x0"] + w["x1"] - cols[i]["x0"] - cols[i]["x1"]) / 2))) if nums else 0
             else:
-                loose.append(l)
-        for l in loose:
-            near = min(anchors, key=lambda a: abs(a["top"] - l[0]["top"]), default=None)
-            if near is not None and abs(near["top"] - l[0]["top"]) <= 22:
-                near["words"].extend(l)
-        for a in anchors:
-            cells = [[] for _ in cols]
-            for w in sorted(a["words"], key=lambda w: (round(w["top"] / 3), w["x0"])):
-                cells[col_of(w)].append(w["text"])
-            rows.append([" ".join(c) for c in cells])
+                for i, c in enumerate(cols):
+                    if w["x0"] >= c["x0"] - 6:
+                        idx = i
+            cells[idx].append(w["text"])
+        rows.append([" ".join(c) for c in cells])
     return rows
 
 
@@ -224,7 +261,7 @@ def _parse_sheets(sheets):
                 continue
             raw_desc = str(get(r, c_desc) or "").strip()
             desc = re.sub(r"\s+", " ", raw_desc).strip()
-            if not desc or re.match(r"total|cleared balance|kindly|page \d", desc, re.I):
+            if not desc or re.match(r"total|cleared balance|effects not cleared|(book |ledger |available )?balance as at|kindly|page \d", desc, re.I):
                 continue
             raw_bal = get(r, c_bal)
             has_bal = raw_bal not in (None, "") and re.search(r"\d", str(raw_bal)) is not None
