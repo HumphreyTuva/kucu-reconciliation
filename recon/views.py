@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import openpyxl
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Max, Min, Sum
 from django.http import HttpResponse
@@ -23,7 +24,7 @@ def groups(cats):
     out = defaultdict(list)
     for c in cats:
         out[c.section].append(c)
-    return [(SEC_LABEL[k], v) for k, v in sorted(out.items())]
+    return [(SEC_LABEL[k], v) for k, v in sorted(out.items(), key=lambda kv: (kv[0].startswith("ex_"), kv[0]))]
 
 
 # ---------------------------------------------------------------- statements
@@ -63,7 +64,8 @@ def home(request):
 
 
 def _lines(cats, agg, key, name):
-    out = [{"key": str(c.id), "name": c.name, "n": agg[c.id]["n"], "total": agg[c.id]["total"]} for c in cats if c.id in agg]
+    out = [{"key": str(c.id), "name": c.name + (" (not counted)" if c.is_excluded else ""), "n": agg[c.id]["n"], "total": agg[c.id]["total"]}
+           for c in cats if c.id in agg]
     if None in agg:
         out.append({"key": key, "name": name, "n": agg[None]["n"], "total": agg[None]["total"], "warn": True})
     tot = sum((l["total"] for l in out), ZERO)
@@ -76,8 +78,8 @@ def build_summary(st):
     cats = list(Category.objects.all())
     agg = lambda f, fld: {r["category"]: r for r in st.transactions.filter(**{f + "__gt": 0}).values("category")
                           .annotate(n=Count("id"), total=Sum(fld))}
-    income, cr = _lines([c for c in cats if c.is_income], agg("credit", "credit"), "nocr", "Uncategorised credits")
-    expense, db = _lines([c for c in cats if not c.is_income], agg("debit", "debit"), "nodb", "Uncategorised debits")
+    income, cr = _lines(cats, agg("credit", "credit"), "nocr", "Uncategorised credits")
+    expense, db = _lines(cats, agg("debit", "debit"), "nodb", "Uncategorised debits")
     return income, cr, expense, db
 
 
@@ -94,14 +96,16 @@ def statement(request, pk):
         qs = qs.filter(debit__gt=0, category__isnull=True)
     elif flt.isdigit():
         qs = qs.filter(category_id=int(flt))
-    dates = [d for d in st.transactions.values_list("date", flat=True) if d]
+    from django.db.models import Max as _Max, Min as _Min
+    span = st.transactions.aggregate(a=_Min("date"), b=_Max("date"))
+    page = Paginator(qs, 100).get_page(request.GET.get("page"))
     active = list(Category.objects.filter(is_active=True))
     return render(request, "recon/statement.html", {
         "st": st, "income": income, "expense": expense, "total_credit": cr, "total_debit": db,
-        "net": cr - db, "check": check, "txs": qs, "flt": flt,
-        "income_groups": groups([c for c in active if c.is_income]),
+        "net": cr - db, "check": check, "txs": page, "flt": flt,
+        "income_groups": groups([c for c in active if c.is_income or c.is_excluded]),
         "expense_groups": groups([c for c in active if not c.is_income]),
-        "start": min(dates) if dates else None, "end": max(dates) if dates else None,
+        "start": span["a"], "end": span["b"],
     })
 
 
@@ -113,7 +117,7 @@ def set_category(request, pk):
     t.category = Category.objects.filter(pk=cid).first() if cid else None
     t.manual, t.note = True, ""
     t.save(update_fields=["category", "manual", "note"])
-    return redirect(f"/statement/{t.statement_id}/?cat={request.POST.get('cat', '')}#tx")
+    return redirect(f"/statement/{t.statement_id}/?cat={request.POST.get('cat', '')}&page={request.POST.get('page', '1')}#tx")
 
 
 @login_required
@@ -201,6 +205,8 @@ def year_data(y):
                                   ("debit", "out_", ("out_1_expenses", "Uncategorised expenses"))):
         for r in qs.filter(**{fld + "__gt": 0}).values("category__section", "category__name").annotate(t=Sum(fld), n=Count("id")):
             sec = r["category__section"]
+            if sec and sec.startswith("ex_"):
+                continue  # transfers between own accounts are not income or expense
             if sec and sec.startswith(prefix):
                 amt[(sec, r["category__name"])] += r["t"]
             else:

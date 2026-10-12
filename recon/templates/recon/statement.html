@@ -34,10 +34,15 @@
 {% if txs %}<div class="scroll"><table class="stack"><thead><tr><th>Date</th><th>Details</th><th class="n">Debit</th><th class="n">Credit</th><th>Category</th></tr></thead><tbody>
 {% for t in txs %}<tr><td data-label="Date">{{ t.date|date:"j M Y" }}</td><td class="desc" data-label="Details" title="{{ t.description }}">{{ t.short_description }}</td>
 <td class="n" data-label="Debit">{% if t.debit %}{{ t.debit|floatformat:2 }}{% else %}–{% endif %}</td><td class="n" data-label="Credit">{% if t.credit %}{{ t.credit|floatformat:2 }}{% else %}–{% endif %}</td>
-<td data-label="Category"><form method="post" action="{% url 'set_category' t.pk %}">{% csrf_token %}<input type="hidden" name="cat" value="{{ flt }}">
+<td data-label="Category"><form method="post" action="{% url 'set_category' t.pk %}">{% csrf_token %}<input type="hidden" name="cat" value="{{ flt }}"><input type="hidden" name="page" value="{{ txs.number }}">
 <select name="category" aria-label="Category" onchange="this.form.submit()"><option value="">Uncategorised</option>
 {% if t.credit %}{% for label, cs in income_groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if t.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}
 {% else %}{% for label, cs in expense_groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if t.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}{% endif %}
 </select></form>{% if t.note %}<div class="flag small">{{ t.note }}</div>{% endif %}</td></tr>{% endfor %}
-</tbody></table></div>{% else %}<div class="empty">No transactions in this view.</div>{% endif %}</div>
+</tbody></table></div>
+{% if txs.paginator.num_pages > 1 %}<nav class="pager noprint" aria-label="Pages">
+{% if txs.has_previous %}<a class="btn ghost" href="?cat={{ flt }}&page={{ txs.previous_page_number }}#tx">← Previous</a>{% endif %}
+<span class="mute">Page {{ txs.number }} of {{ txs.paginator.num_pages }} · {{ txs.paginator.count }} transactions</span>
+{% if txs.has_next %}<a class="btn ghost" href="?cat={{ flt }}&page={{ txs.next_page_number }}#tx">Next →</a>{% endif %}</nav>{% endif %}
+{% else %}<div class="empty">No transactions in this view.</div>{% endif %}</div>
 {% endblock %}

@@ -1,5 +1,6 @@
 """Statement parsing and categorisation (replaces the Excel SUMPRODUCT/SEARCH formulas)."""
 import csv
+import html
 import io
 import re
 from difflib import SequenceMatcher
@@ -80,7 +81,7 @@ def _sheets(name, data, password=""):
 
 
 HEAD_DESC = r"details|description|narrat|particular"
-HEAD_DATE = r"transaction date|trans\.? ?date|posting date|^date"
+HEAD_DATE = r"transaction date|trans\.? ?date|posting ?date|^date"
 
 
 def _pdf_sheets(data, password):
@@ -160,6 +161,8 @@ def _words_rows(pdf):
                     if re.fullmatch(HEAD_DESC, w["text"].lower()):
                         cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
                 cols.sort(key=lambda c: c["x0"])
+            if not any(re.search(HEAD_DATE, c["text"], re.I) for c in cols):  # "Date Date" header line was split off
+                cols.insert(0, {"text": "Transaction Date", "x0": 0, "x1": cols[0]["x0"] - 1})
 
         def col_of(w):
             if NUM.match(w["text"]):
@@ -259,18 +262,20 @@ def _parse_sheets(sheets):
             if not any(str(c or "").strip() for c in r):  # blank row = page break
                 first_on_page = True
                 continue
-            raw_desc = str(get(r, c_desc) or "").strip()
+            raw_desc = html.unescape(str(get(r, c_desc) or "")).strip()
             desc = re.sub(r"\s+", " ", raw_desc).strip()
-            if not desc or re.match(r"total|cleared balance|effects not cleared|(book |ledger |available )?balance as at|kindly|page \d", desc, re.I):
+            if re.match(r"total|cleared balance|effects not cleared|(book |ledger |available )?balance as at|kindly|page \d", desc, re.I):
                 continue
             raw_bal = get(r, c_bal)
             has_bal = raw_bal not in (None, "") and re.search(r"\d", str(raw_bal)) is not None
             bal = to_dec(raw_bal) if has_bal else None
+            cr, db = abs(to_dec(get(r, c_cr))), abs(to_dec(get(r, c_deb)))  # some banks write debits as negatives
+            if not desc and not cr and not db:
+                continue
             if re.search(r"b/?fwd|brought forward|opening balance", desc, re.I):
                 opening = bal if bal is not None else to_dec(get(r, c_cr))
                 prev_bal = opening
                 continue
-            cr, db = to_dec(get(r, c_cr)), to_dec(get(r, c_deb))
             if not cr and not db:
                 if not has_bal and rows and not to_date(get(r, 0)) and not str(get(r, 0) or "").strip():
                     rows[-1]["description"] += " " + desc  # wrapped text of the transaction above
@@ -289,8 +294,10 @@ def _parse_sheets(sheets):
                 if abs(abs(delta) - amount) <= PENNY:  # direction from the balance, whatever column it was in
                     cr, db = (amount, Decimal("0")) if delta > 0 else (Decimal("0"), amount)
             if bal is not None:
+                if prev_bal is None and opening is None:
+                    opening = bal - cr + db  # no B/Fwd row: work back from the first balance
                 prev_bal = closing = bal
-            rows.append({"date": to_date(get(r, c_dt)), "description": desc, "debit": db, "credit": cr})
+            rows.append({"date": to_date(get(r, c_dt)), "description": desc or "(no narrative)", "debit": db, "credit": cr})
     return rows, opening, closing, found
 
 
@@ -351,7 +358,7 @@ def _candidates(words):
     return out
 
 
-def _kw_match(kw, words, cands):
+def _kw_match(kw, words, cands, fuzzy=True):
     """Return None, or (kind, original text) where kind is exact | fuzzy."""
     for c, orig in cands:
         if c == kw:
@@ -361,6 +368,8 @@ def _kw_match(kw, words, cands):
     for c, orig in cands:
         if c.startswith(kw):
             return "exact", orig
+    if not fuzzy:  # names such as "Charles" must not be read as the keyword "charges"
+        return None
     for c, orig in cands:
         if abs(len(c) - len(kw)) <= 2 and _sim(kw, c) >= 0.8:
             return "fuzzy", orig
@@ -375,14 +384,23 @@ def _compile(categories):
     return [(c, [k.lower().replace(" ", "") for k in c.keyword_list()]) for c in categories]
 
 
-def find_category(description, compiled):
-    """Return (category or None, note)."""
+def find_category(description, compiled, fuzzy=True, cache=None):
+    """Return (category or None, note). Misspelling tolerance (fuzzy) is meant for money received."""
     words = _words(description)
+    if cache is not None and tuple(words) in cache:
+        return cache[tuple(words)]
+    result = _find(words, compiled, fuzzy)
+    if cache is not None:
+        cache[tuple(words)] = result
+    return result
+
+
+def _find(words, compiled, fuzzy):
     cands = _candidates(words)
     hits, notes = [], []
     for cat, kws in compiled:
         for kw in kws:
-            m = _kw_match(kw, words, cands)
+            m = _kw_match(kw, words, cands, fuzzy)
             if m:
                 hits.append(cat)
                 if m[0] == "fuzzy":
@@ -400,15 +418,16 @@ def find_category(description, compiled):
 def categorise(statement):
     """Apply the keyword rules to every transaction whose category was not set by hand."""
     cats = list(Category.objects.filter(is_active=True))
-    income = _compile([c for c in cats if c.is_income])
+    income = _compile([c for c in cats if c.is_income or c.is_excluded])
     expense = _compile([c for c in cats if not c.is_income])
-    changed = []
-    for t in statement.transactions.filter(manual=False):
-        cat, note = find_category(t.description, income if t.credit else expense)
+    cache_in, cache_out, changed = {}, {}, []
+    for t in statement.transactions.filter(manual=False).iterator():
+        cat, note = (find_category(t.description, income, True, cache_in) if t.credit
+                     else find_category(t.description, expense, False, cache_out))
         if t.category_id != (cat.id if cat else None) or t.note != note:
             t.category, t.note = cat, note
             changed.append(t)
-    Transaction.objects.bulk_update(changed, ["category", "note"])
+    Transaction.objects.bulk_update(changed, ["category", "note"], batch_size=500)
 
 
 def import_statement(statement, rows):

@@ -100,3 +100,4 @@ table.ft tr.grand td{font-weight:800;border-top:1px solid #222;border-bottom:3px
 @media print{.fs{border:0;padding:0}.msg{display:none}}
 .install{margin:12px 0 0;background:var(--brand-l);color:var(--brand);border-color:#c9cef5;padding:8px 14px}.install:hover{background:#dde1f8}.install[hidden]{display:none}
 .pw{margin-top:14px;display:grid;gap:4px;max-width:360px}
+.pager{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}

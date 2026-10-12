@@ -8,6 +8,7 @@ SECTIONS = [
     ("in_3_other", "Income: Other income"),
     ("out_1_expenses", "Expense: General expenses"),
     ("out_2_special_events", "Expense: Special events"),
+    ("ex_1_transfers", "Not counted: transfers between own accounts"),
 ]
 
 
@@ -30,6 +31,10 @@ class Category(models.Model):
     @property
     def is_income(self):
         return self.section.startswith("in_")
+
+    @property
+    def is_excluded(self):
+        return self.section.startswith("ex_")
 
     def keyword_list(self):
         return [k.strip() for k in self.keywords.split(",") if k.strip()]
