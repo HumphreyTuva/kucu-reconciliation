@@ -14,6 +14,9 @@ urlpatterns = [
     path("statement/<int:pk>/delete/", views.delete_statement, name="delete_statement"),
     path("transaction/<int:pk>/category/", views.set_category, name="set_category"),
     path("categories/", views.categories, name="categories"),
+    path("budget/", views.budget, name="budget"),
+    path("budget/mapping/", views.budget_mapping, name="budget_mapping"),
+    path("budget/<int:year>/<int:month>/", views.budget_month, name="budget_month"),
     path("report/", views.report, name="report"),
     path("report/export/", views.report_export, name="report_export"),
 ]

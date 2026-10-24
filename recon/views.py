@@ -1,3 +1,4 @@
+import calendar
 import io
 from collections import defaultdict
 from datetime import date
@@ -7,13 +8,13 @@ import openpyxl
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Max, Min, Sum
+from django.db.models import Count, Max, Min, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .forms import CategoryFormSet, UploadForm
-from .models import SECTIONS, Category, ManualEntry, Statement, Transaction
+from .models import SECTIONS, BudgetLine, Category, ItemMap, ManualEntry, Statement, Transaction
 from .services import StatementError, categorise, import_statement, parse_statement
 
 SEC_LABEL = dict(SECTIONS)
@@ -200,10 +201,17 @@ def fy_of(d):
 
 def year_data(y):
     qs = Transaction.objects.filter(date__range=(date(y - 1, 10, 1), date(y, 9, 30)))
-    amt, uncat = defaultdict(lambda: ZERO), 0
-    for fld, prefix, fallback in (("credit", "in_", ("in_3_other", "Other incomes (uncategorised)")),
-                                  ("debit", "out_", ("out_1_expenses", "Uncategorised expenses"))):
-        for r in qs.filter(**{fld + "__gt": 0}).values("category__section", "category__name").annotate(t=Sum(fld), n=Count("id")):
+    # Months covered by the budget workbook take their expenses from its itemised actuals, not from bank debits
+    # (the same spending would otherwise be counted twice).
+    bud = list(BudgetLine.objects.filter(Q(year=y - 1, month__gte=10) | Q(year=y, month__lte=9)).select_related("category"))
+    bud_months = sorted({(b.year, b.month) for b in bud})
+    qs_out = qs
+    for yy, mm in bud_months:
+        qs_out = qs_out.exclude(date__year=yy, date__month=mm)
+    amt, uncat, unmapped = defaultdict(lambda: ZERO), 0, 0
+    for fld, base, prefix, fallback in (("credit", qs, "in_", ("in_3_other", "Other incomes (uncategorised)")),
+                                        ("debit", qs_out, "out_", ("out_1_expenses", "Uncategorised expenses"))):
+        for r in base.filter(**{fld + "__gt": 0}).values("category__section", "category__name").annotate(t=Sum(fld), n=Count("id")):
             sec = r["category__section"]
             if sec and sec.startswith("ex_"):
                 continue  # transfers between own accounts are not income or expense
@@ -211,15 +219,24 @@ def year_data(y):
                 amt[(sec, r["category__name"])] += r["t"]
             else:
                 amt[fallback] += r["t"]; uncat += r["n"]
+    for b in bud:
+        cat = b.category
+        if cat and cat.section.startswith("ex_"):
+            continue
+        if cat and cat.section.startswith("out_"):
+            amt[(cat.section, cat.name)] += b.actual
+        else:
+            amt[("out_1_expenses", "Other expenses (not yet mapped)")] += b.actual
+            unmapped += 1
     manual = list(ManualEntry.objects.filter(year=y))
     for m in manual:
         amt[(m.section, m.label)] += m.amount
-    return amt, uncat, qs.exists() or bool(manual)
+    return amt, uncat, qs.exists() or bool(manual) or bool(bud), bud_months, unmapped
 
 
 def build_report(y):
-    cur, uncat, has_cur = year_data(y)
-    prev, _, has_prev = year_data(y - 1)
+    cur, uncat, has_cur, bud_months, unmapped = year_data(y)
+    prev, _, has_prev, _, _ = year_data(y - 1)
 
     def rows(sec):
         names = [c.name for c in Category.objects.filter(section=sec)]
@@ -241,12 +258,14 @@ def build_report(y):
         "note5": [(title, S[k]) for title, k in (("Tithes and Offering", "in_1_tithes_offering"),
                                                   ("Net proceeds from projects", "in_2_projects"), ("Other income", "in_3_other"))],
         "note6": S["out_2_special_events"], "uncat": uncat, "has_data": has_cur, "has_prev": has_prev,
+        "budget_months": ", ".join(f"{calendar.month_abbr[m]} {yy}" for yy, m in bud_months), "unmapped": unmapped,
     }
 
 
 def _years():
     ys = {fy_of(d) for d in Transaction.objects.exclude(date=None).dates("date", "month")}
     ys |= set(ManualEntry.objects.values_list("year", flat=True))
+    ys |= {fy_of(date(yy, mm, 1)) for yy, mm in BudgetLine.objects.values_list("year", "month").distinct()}
     return sorted(ys, reverse=True)
 
 
@@ -359,3 +378,108 @@ def offline(request):
 def support(request):
     """Public page, so people who cannot log in can still reach support."""
     return render(request, "recon/support.html", {"phone": "+254113631232", "wa": "254113631232", "email": "tuvalabs@gmail.com"})
+
+
+# -------------------------------------------------------------------- budget
+from .budget import import_budget, norm, parse_budget
+
+
+def fy_months(fy):
+    return [(fy - 1, m) for m in (10, 11, 12)] + [(fy, m) for m in range(1, 10)]
+
+
+@login_required
+def budget(request):
+    if request.method == "POST":
+        f = request.FILES.get("file")
+        year = request.POST.get("year", "").strip()
+        if not f:
+            messages.error(request, "Choose the budget workbook first.")
+        else:
+            try:
+                parsed = parse_budget(f, int(year) if year.isdigit() else None)
+                months = import_budget(parsed)
+            except StatementError as e:
+                messages.error(request, f"{f.name}: {e}")
+            else:
+                if months:
+                    names = ", ".join(f"{calendar.month_abbr[m]} {y}" for y, m in months)
+                    messages.success(request, f"Imported actual spending and budget for {names} ({len(parsed['lines'])} lines read from sheet \u201c{parsed['sheet']}\u201d).")
+                else:
+                    messages.warning(request, "No month in this workbook has actual spending yet, so nothing was imported.")
+                if parsed["ignored"]:
+                    messages.info(request, "Skipped: " + "; ".join(parsed["ignored"]) + ".")
+                return redirect("budget")
+    ys = sorted({fy_of(date(yy, mm, 1)) for yy, mm in BudgetLine.objects.values_list("year", "month").distinct()}, reverse=True)
+    try:
+        fy = int(request.GET.get("year", ""))
+    except ValueError:
+        fy = ys[0] if ys else None
+    rows, tot = [], {"actual": ZERO, "budget": ZERO}
+    if fy:
+        for yy, mm in fy_months(fy):
+            a = BudgetLine.objects.filter(year=yy, month=mm).aggregate(a=Sum("actual"), b=Sum("budget"), n=Count("id"))
+            if not a["n"]:
+                continue
+            bank = Transaction.objects.filter(date__year=yy, date__month=mm, debit__gt=0).aggregate(t=Sum("debit"))["t"]
+            rows.append({"year": yy, "month": mm, "name": f"{calendar.month_name[mm]} {yy}", "actual": a["a"], "budget": a["b"],
+                         "diff": a["b"] - a["a"], "bank": bank})
+            tot["actual"] += a["a"]; tot["budget"] += a["b"]
+    unmapped = BudgetLine.objects.filter(category__isnull=True).values("item").distinct().count()
+    return render(request, "recon/budget.html", {"years": ys, "fy": fy, "rows": rows, "tot": tot, "diff": tot["budget"] - tot["actual"],
+                                                  "unmapped": unmapped, "thisyear": date.today().year})
+
+
+@login_required
+def budget_month(request, year, month):
+    lines = list(BudgetLine.objects.filter(year=year, month=month).select_related("category"))
+    if not lines:
+        messages.error(request, "No budget data for that month.")
+        return redirect("budget")
+    groups_, order = {}, []
+    for l in lines:
+        if l.group not in groups_:
+            groups_[l.group] = []
+            order.append(l.group)
+        groups_[l.group].append({"item": l.item, "actual": l.actual, "budget": l.budget, "diff": l.budget - l.actual, "cat": l.category})
+    out = [{"name": g or "Other", "lines": groups_[g], "actual": sum((x["actual"] for x in groups_[g]), ZERO),
+            "budget": sum((x["budget"] for x in groups_[g]), ZERO)} for g in order]
+    for g in out:
+        g["diff"] = g["budget"] - g["actual"]
+    ta, tb = sum((g["actual"] for g in out), ZERO), sum((g["budget"] for g in out), ZERO)
+    bank = Transaction.objects.filter(date__year=year, date__month=month, debit__gt=0).aggregate(t=Sum("debit"))["t"]
+    return render(request, "recon/budget_month.html", {"title": f"{calendar.month_name[month]} {year}", "groups": out, "actual": ta,
+                                                        "budget": tb, "diff": tb - ta, "bank": bank, "fy": fy_of(date(year, month, 1))})
+
+
+@login_required
+def budget_mapping(request):
+    cats = [c for c in Category.objects.filter(is_active=True) if c.section.startswith("out_") or c.is_excluded]
+    if request.method == "POST":
+        changed = 0
+        names = list(BudgetLine.objects.values_list("item", flat=True).distinct())
+        by_key = defaultdict(list)
+        for n in names:
+            by_key[norm(n)].append(n)
+        for key, value in request.POST.items():
+            if not key.startswith("map_"):
+                continue
+            k = key[4:]
+            cat = Category.objects.filter(pk=value).first() if value else None
+            if cat:
+                ItemMap.objects.update_or_create(key=k, defaults={"category": cat})
+            else:
+                ItemMap.objects.filter(key=k).delete()
+            changed += BudgetLine.objects.filter(item__in=by_key.get(k, [])).update(category=cat)
+        messages.success(request, "Mapping saved. The annual report now uses it.")
+        return redirect("budget_mapping")
+    agg = {}
+    for l in BudgetLine.objects.select_related("category"):
+        k = norm(l.item)
+        a = agg.setdefault(k, {"key": k, "item": l.item, "groups": set(), "actual": ZERO, "cat": l.category_id})
+        a["actual"] += l.actual
+        a["groups"].add(l.group)
+    items = sorted(agg.values(), key=lambda a: -a["actual"])
+    for a in items:
+        a["groups"] = ", ".join(sorted(g for g in a["groups"] if g))
+    return render(request, "recon/budget_mapping.html", {"items": items, "groups": groups(cats)})

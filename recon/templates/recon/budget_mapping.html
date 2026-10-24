@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% load recon_extras %}{% block title %}Map budget items{% endblock %}
+{% block content %}
+<div class="crumb noprint"><a href="{% url 'budget' %}">← Budget</a></div>
+<h1>Map budget items to report lines</h1>
+<p class="sub">Choose which line of the annual report each budget item belongs to, for example &ldquo;Speakers Food&rdquo; under Refreshments. Your choice is remembered for every month and for future uploads. Items left blank appear in the report as &ldquo;Other expenses (not yet mapped)&rdquo;.</p>
+<form method="post" class="card">{% csrf_token %}
+<div class="scroll"><table class="stack"><thead><tr><th>Budget item</th><th>Department</th><th class="n">Actual spent</th><th>Report line</th></tr></thead><tbody>
+{% for a in items %}<tr><td data-label="Item"><b>{{ a.item }}</b></td><td data-label="Department" class="mute">{{ a.groups }}</td><td class="n" data-label="Actual">{{ a.actual|kes }}</td>
+<td data-label="Report line"><select name="map_{{ a.key }}"><option value="">Not mapped</option>
+{% for label, cs in groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if a.cat == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></td></tr>{% endfor %}
+</tbody></table></div><div class="upload-actions"><button>Save mapping</button></div></form>
+{% endblock %}

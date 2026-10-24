@@ -117,3 +117,4 @@ textarea:focus{border-color:var(--brand)}
 .foot .tl{background:#000;border-radius:8px;padding:4px 10px;display:inline-flex}.foot .tl img{height:26px;margin:0;vertical-align:middle}
 @media(max-width:720px){.sup-hero{flex-direction:column;text-align:center;padding:22px}.sup-hero img{max-width:70%}.hf{grid-template-columns:1fr}}
 @media print{.sup-hero,.contacts{display:none}}
+.bu{display:grid;grid-template-columns:2fr 1fr auto;gap:14px;align-items:end}.bu input[type=file]{padding:8px;background:#fff}@media(max-width:720px){.bu{grid-template-columns:1fr}}

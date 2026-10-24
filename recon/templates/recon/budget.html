@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% load recon_extras %}{% block title %}Budget{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Budget and actual spending</h1><p class="sub">Upload the budget workbook to bring in every expense line, month by month. The annual report then uses the actual spending for those months.</p></div></div>
+
+<form class="card" method="post" enctype="multipart/form-data">{% csrf_token %}
+<h2 style="margin-bottom:10px">Upload the budget workbook</h2>
+<div class="bu"><div><label for="bf">Excel file (.xlsx)</label><input type="file" id="bf" name="file" accept=".xlsx,.xlsm" required></div>
+<div><label for="by">Year (optional)</label><input type="number" id="by" name="year" placeholder="{{ thisyear }}" min="2000" max="2100"><span class="small mute">Leave blank to read it from the sheet name, e.g. &ldquo;2026 BUDGET&rdquo;.</span></div>
+<div><button>Import</button></div></div>
+<p class="small mute" style="margin:10px 0 0">Only months that already have actual spending are imported. Upload the file again later to add new months or update old ones; a month you upload again replaces the earlier copy.</p></form>
+
+{% if fy %}
+<div class="head noprint"><h2>Financial year ended 30 Sep {{ fy }}</h2>
+<div class="actions"><form method="get" class="yr"><select name="year" onchange="this.form.submit()" aria-label="Year">{% for y in years %}<option value="{{ y }}" {% if y == fy %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></form>
+<a class="btn ghost" href="{% url 'budget_mapping' %}">Map items to report lines{% if unmapped %} ({{ unmapped }} to check){% endif %}</a></div></div>
+<div class="card"><div class="scroll"><table class="stack"><thead><tr><th>Month</th><th class="n">Actual spent</th><th class="n">Budget</th><th class="n">Over (−) / under (+)</th><th class="n">Money out of bank</th></tr></thead><tbody>
+{% for r in rows %}<tr><td data-label="Month"><a href="{% url 'budget_month' r.year r.month %}"><b>{{ r.name }}</b></a></td><td class="n" data-label="Actual">{{ r.actual|kes }}</td><td class="n" data-label="Budget">{{ r.budget|kes }}</td>
+<td class="n {% if r.diff < 0 %}bad{% else %}ok{% endif %}" data-label="Over / under">{{ r.diff|kes }}</td><td class="n" data-label="Bank debits">{% if r.bank %}{{ r.bank|kes }}{% else %}<span class="mute">not uploaded</span>{% endif %}</td></tr>{% endfor %}
+</tbody><tfoot><tr><td>Total</td><td class="n" data-label="Actual">{{ tot.actual|kes }}</td><td class="n" data-label="Budget">{{ tot.budget|kes }}</td><td class="n {% if diff < 0 %}bad{% endif %}" data-label="Over / under">{{ diff|kes }}</td><td></td></tr></tfoot></table></div>
+<p class="small mute" style="margin:10px 0 0">&ldquo;Money out of bank&rdquo; is the debits on your uploaded bank statements for that month. It can differ from actual spending because of petty cash, transfers and timing. The totals here add up the individual expense lines, not the workbook&rsquo;s own subtotal rows.</p></div>
+{% else %}<div class="card empty"><p><b>No budget uploaded yet.</b></p><p>Choose your budget workbook above to get started.</p></div>{% endif %}
+{% endblock %}

@@ -7,6 +7,8 @@
 {% if not year %}<div class="card empty"><p><b>No data yet.</b></p><p>Upload your bank statements and the report builds itself.</p><a class="btn" href="{% url 'home' %}">Upload a statement</a></div>
 {% else %}
 {% if uncat %}<div class="msg warning noprint">{{ uncat }} transaction{{ uncat|pluralize }} in this year {{ uncat|pluralize:"has,have" }} no category and {{ uncat|pluralize:"is,are" }} shown as “Other incomes (uncategorised)” or “Uncategorised expenses”. Open the statements and assign them for an exact report.</div>{% endif %}
+{% if budget_months %}<div class="msg noprint"><b>Expenses for {{ budget_months }}</b> come from the budget workbook (actual spending, item by item). Other months use bank transactions.
+{% if unmapped %}{{ unmapped }} budget line{{ unmapped|pluralize }} {{ unmapped|pluralize:"is,are" }} not yet matched to a report line. <a href="{% url 'budget_mapping' %}">Map them</a> for an exact report.{% endif %}</div>{% endif %}
 <div class="msg noprint">This report is built from bank transactions (cash basis). Items that never touch the bank, such as <b>depreciation</b> or <b>tuck shop net proceeds</b>, can be added
 {% if user.is_staff %}<a href="{% url 'admin:recon_manualentry_add' %}">as manual entries</a>{% else %}as manual entries by an administrator{% endif %}.</div>
 

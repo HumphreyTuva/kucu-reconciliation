@@ -85,3 +85,27 @@ class ManualEntry(models.Model):
 
     def __str__(self):
         return f"{self.year} {self.label}: {self.amount}"
+
+
+class BudgetLine(models.Model):
+    """One expense line for one month from the budget workbook: what was budgeted and what was actually spent."""
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    group = models.CharField(max_length=80, blank=True, help_text="Department, e.g. Discipleship or Worship Comm")
+    item = models.CharField(max_length=120)
+    actual = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    budget = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    category = models.ForeignKey(Category, null=True, blank=True, on_delete=models.SET_NULL, related_name="budget_lines")
+
+    class Meta:
+        ordering = ["year", "month", "id"]
+        indexes = [models.Index(fields=["year", "month"])]
+
+    def __str__(self):
+        return f"{self.year}-{self.month:02d} {self.group}: {self.item}"
+
+
+class ItemMap(models.Model):
+    """Remembers which report line a budget item belongs to, so later uploads are mapped automatically."""
+    key = models.CharField(max_length=120, unique=True)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)

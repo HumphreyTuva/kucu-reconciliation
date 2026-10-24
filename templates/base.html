@@ -12,13 +12,14 @@
   <nav class="nav" aria-label="Main">
     <a href="{% url 'home' %}" class="{% if u == 'home' or u == 'statement' %}on{% endif %}">Statements</a>
     <a href="{% url 'report' %}" class="{% if u == 'report' %}on{% endif %}">Annual report</a>
+    <a href="{% url 'budget' %}" class="{% if u == 'budget' or u == 'budget_month' or u == 'budget_mapping' %}on{% endif %}">Budget</a>
     <a href="{% url 'categories' %}" class="{% if u == 'categories' %}on{% endif %}">Categories</a>
     <a href="{% url 'support' %}" class="{% if u == 'support' %}on{% endif %}">Support</a>
     {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form>
   </nav>
   <details class="menu"><summary aria-label="Menu">☰</summary><div class="panel">
-    <a href="{% url 'home' %}">Statements</a><a href="{% url 'report' %}">Annual report</a><a href="{% url 'categories' %}">Categories</a><a href="{% url 'support' %}">Support</a>
+    <a href="{% url 'home' %}">Statements</a><a href="{% url 'report' %}">Annual report</a><a href="{% url 'budget' %}">Budget</a><a href="{% url 'categories' %}">Categories</a><a href="{% url 'support' %}">Support</a>
     {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Log out</button></form></div></details>
   {% endwith %}{% else %}<nav class="nav"><a href="{% url 'support' %}">Support</a></nav>{% endif %}

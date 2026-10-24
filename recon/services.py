@@ -33,7 +33,7 @@ def to_date(v):
         return v.date()
     if isinstance(v, date):
         return v
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d-%b-%Y", "%d/%m/%y"):
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d-%b-%Y", "%d/%m/%y", "%Y%m%d"):
         try:
             return datetime.strptime(str(v).strip()[:11].strip(), fmt).date()
         except (ValueError, TypeError):
@@ -81,12 +81,69 @@ def _sheets(name, data, password=""):
 
 
 HEAD_DESC = r"details|description|narrat|particular"
-HEAD_DATE = r"transaction date|trans\.? ?date|posting ?date|^date"
+HEAD_DATE = r"transaction date|trans\.? ?date|posting ?date|booking ?\.?date|^date"
+
+
+class _FastPage:
+    """Words with positions straight from PDFium: about 40 times faster than pdfplumber on long statements."""
+
+    def __init__(self, page, number):
+        self._page, self.page_number = page, number
+
+    def extract_words(self):
+        page = self._page
+        height = page.get_height()
+        tp = page.get_textpage()
+        n = tp.count_chars()
+        text = tp.get_text_range()
+        if len(text) != n:
+            raise ValueError("character count mismatch")
+        words, cur = [], None
+        for i, ch in enumerate(text):
+            if ch.isspace() or ch in "\x00\x02\ufffe\uffff":
+                cur = None
+                continue
+            left, bottom, right, top = tp.get_charbox(i, loose=True)
+            if cur and abs(top - cur["_top"]) <= 2 and left - cur["x1"] <= 3 and left >= cur["x0"]:
+                cur["text"] += ch
+                cur["x1"] = max(cur["x1"], right)
+            else:
+                cur = {"text": ch, "x0": left, "x1": right, "top": height - top, "bottom": height - bottom, "_top": top}
+                words.append(cur)
+        return words
+
+
+class _FastDoc:
+    def __init__(self, data, password):
+        import pypdfium2 as pdfium
+        self._doc = pdfium.PdfDocument(data, password=password or None)
+        self.pages = [_FastPage(self._doc[i], i + 1) for i in range(len(self._doc))]
+
+    def close(self):
+        self._doc.close()
+
+
+def _password_error(password):
+    return StatementError("The PDF password was not accepted." if password else
+                          "This PDF is password-protected. Enter its password in the password box and upload again.")
 
 
 def _pdf_sheets(data, password):
     """Yield readings of a (possibly password-protected) bank statement PDF: first from word positions (fast and
     exact for wrapped descriptions), then from ruled tables. parse_statement stops at the first that reconciles."""
+    words = None
+    try:  # fast path: PDFium
+        doc = _FastDoc(data, password)
+        try:
+            words = _words_rows(doc)
+        finally:
+            doc.close()
+    except Exception as e:
+        if "password" in str(e).lower():
+            raise _password_error(password)
+        words = None  # fall back to pdfplumber below
+    if words:
+        yield words
     try:
         import pdfplumber
     except ImportError:
@@ -96,13 +153,13 @@ def _pdf_sheets(data, password):
     except Exception as e:
         inner = e.args[0] if e.args else e  # pdfplumber wraps pdfminer's error
         if type(inner).__name__ == "PDFPasswordIncorrect" or type(e).__name__ == "PDFPasswordIncorrect":
-            raise StatementError("The PDF password was not accepted." if password else
-                                 "This PDF is password-protected. Enter its password in the password box and upload again.")
+            raise _password_error(password)
         raise StatementError("This PDF could not be read. Is it a scanned image or a damaged file?")
     with pdf:
-        words = _words_rows(pdf)
-        if words:
-            yield words
+        if words is None:  # PDFium could not read it: use pdfplumber's words
+            slow = _words_rows(pdf)
+            if slow:
+                yield slow
         tables = []
         for page in pdf.pages:
             for t in page.extract_tables():  # tables drawn with ruled lines
@@ -116,7 +173,8 @@ def _is_header(r):
 
 
 NUM = re.compile(r"^-?[\d,]+\.\d{2}$")
-DATE = re.compile(r"\b\d{1,2}[-/. ](?:\d{1,2}|[A-Za-z]{3,9})[-/. ]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b")
+DATE = re.compile(r"\b\d{1,2}[-/. ](?:\d{1,2}|[A-Za-z]{3,9})[-/. ]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b|\b20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\b")
+PREAMBLE = re.compile(r"balance|start|period|for|opening|b/?f(wd)?|brought|forward|statement|ref|date|[\d,]+\.\d\d|\W*\w{1,2}\W*")
 AMT_HEAD = re.compile("debit|credit|balance", re.I)
 
 
@@ -145,6 +203,9 @@ def _words_rows(pdf):
     cols, anchors, policy, last = None, [], None, None
     for page in pdf.pages:
         lines = _lines(page.extract_words())
+        for l in lines:
+            for w in l:
+                w["pg"] = page.page_number
         hi = next((k for k, l in enumerate(lines) if _is_head_line(l)), None)
         if cols is None:
             if hi is None:
@@ -152,7 +213,7 @@ def _words_rows(pdf):
             l = lines[hi]
             cols = []
             for w in l:
-                if cols and w["x0"] - cols[-1]["x1"] <= 9:
+                if cols and w["x0"] - cols[-1]["x1"] <= 5.5:
                     cols[-1].update(text=cols[-1]["text"] + " " + w["text"], x1=w["x1"])
                 else:
                     cols.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
@@ -177,7 +238,8 @@ def _words_rows(pdf):
             return idx
 
         dcol = next((i for i, c in enumerate(cols) if re.search(HEAD_DATE, c["text"], re.I)), 0)
-        is_anchor = lambda l: bool(DATE.search(" ".join(w["text"] for w in l if col_of(w) == dcol)))
+        is_anchor = lambda l: bool(DATE.search(" ".join(w["text"] for w in l if col_of(w) == dcol))
+                                   or DATE.match(" ".join(w["text"] for w in l[:3])))
         body = [l for k, l in enumerate(lines) if (hi is None or k > hi) and not _is_head_line(l)]
         head_bottom = lines[hi][0]["top"] if hi is not None else None
         while body and head_bottom is not None and all(re.fullmatch(r"(date|dates|value|transaction|ref|no\.?|\(?kes\)?|amount)", w["text"].lower()) for w in body[0]):
@@ -186,10 +248,11 @@ def _words_rows(pdf):
             first = next((k for k, l in enumerate(body) if is_anchor(l)), None)
             if first is None:
                 continue
-            policy = "below" if first == 0 else "nearest"
+            junk = all(all(PREAMBLE.fullmatch(w["text"].lower()) for w in l) for l in body[:first])
+            policy = "below" if junk else "nearest"
         if policy == "below":
             cur = last
-            prev_top = head_bottom
+            prev_top = head_bottom if head_bottom is not None else (body[0][0]["top"] - 8 if body else None)
             for l in body:
                 if is_anchor(l):
                     last = cur = {"top": l[0]["top"], "words": list(l)}
@@ -216,7 +279,7 @@ def _words_rows(pdf):
     rows = [[c["text"] for c in cols]]
     for a in anchors:
         cells = [[] for _ in cols]
-        for w in sorted(a["words"], key=lambda w: (round(w["top"] / 3), w["x0"])):
+        for w in sorted(a["words"], key=lambda w: (w.get("pg", 0), round(w["top"] / 3), w["x0"])):
             # col_of needs the page-independent header positions, which are fixed for the whole statement
             idx = 0
             if NUM.match(w["text"]):
