@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from .budget import BANK_ONLY
 from .forms import CategoryFormSet, UploadForm
 from .models import SECTIONS, BudgetLine, Category, ItemMap, ManualEntry, Statement, Transaction
 from .services import StatementError, categorise, import_statement, parse_statement
@@ -205,9 +206,11 @@ def year_data(y):
     # (the same spending would otherwise be counted twice).
     bud = list(BudgetLine.objects.filter(Q(year=y - 1, month__gte=10) | Q(year=y, month__lte=9)).select_related("category"))
     bud_months = sorted({(b.year, b.month) for b in bud})
-    qs_out = qs
+    in_budget_month = Q()
     for yy, mm in bud_months:
-        qs_out = qs_out.exclude(date__year=yy, date__month=mm)
+        in_budget_month |= Q(date__year=yy, date__month=mm)
+    # bank fees are never itemised in the workbook, so they still come from the statements
+    qs_out = qs.filter(~in_budget_month | Q(category__name__in=BANK_ONLY)) if bud_months else qs
     amt, uncat, unmapped = defaultdict(lambda: ZERO), 0, 0
     for fld, base, prefix, fallback in (("credit", qs, "in_", ("in_3_other", "Other incomes (uncategorised)")),
                                         ("debit", qs_out, "out_", ("out_1_expenses", "Uncategorised expenses"))):

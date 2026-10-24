@@ -9,6 +9,7 @@ from .services import StatementError, _compile, find_category, to_dec
 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+BANK_ONLY = {"Bank service charges"}  # comes from the bank statements, never from the budget workbook
 STOP = re.compile(r"monthly totals?|total expenditure|grand total|^totals?$", re.I)
 
 
@@ -95,6 +96,8 @@ def import_budget(parsed):
         cat = saved.get(norm(l["item"]))
         if cat is None:
             cat, _ = find_category(l["item"], expense, True, cache)
+        if cat is not None and cat.name in BANK_ONLY:
+            cat = None  # e.g. "Swimming pool charges" is not a bank charge
         out.append(BudgetLine(category=cat, **l))
     for y, m in months:
         BudgetLine.objects.filter(year=y, month=m).delete()
