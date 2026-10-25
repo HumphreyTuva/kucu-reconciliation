@@ -1,28 +1,28 @@
 {% extends "base.html" %}{% load recon_extras %}{% block title %}Annual report{% endblock %}
 {% block content %}
-<div class="head noprint"><div><h1>Annual financial report</h1><p class="sub">Built automatically from every statement you have uploaded. Financial year ends 30 September.</p></div>
-{% if year %}<div class="actions"><form method="get" class="yr"><label for="y" class="small mute">Year ended 30 Sep</label><select id="y" name="year" onchange="this.form.submit()">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></form>
-<a class="btn" href="{% url 'report_export' %}?year={{ year }}">Download Excel</a><button class="ghost" onclick="window.print()">Print</button></div>{% endif %}</div>
+<div class="head noprint"><div><h1>Annual financial report</h1><p class="sub">Built automatically from everything you have uploaded, for the dates you choose. <a href="{% url 'periods' %}">Set your financial year</a>.</p></div>
+{% if has_any %}<div class="actions"><form method="get" class="yr"><label for="pp" class="small mute">Period</label><select id="pp" name="p" onchange="this.form.submit()">{% for f in fys %}<option value="{{ f.id }}" {% if f.id|stringformat:"s" == p %}selected{% endif %}>{{ f.label }}</option>{% endfor %}<option value="all" {% if p == 'all' %}selected{% endif %}>All data ({{ period.start|date:"M Y" }} – {{ period.end|date:"M Y" }})</option></select></form>
+<a class="btn" href="{% url 'report_export' %}?p={{ p }}">Download Excel</a><button class="ghost" onclick="window.print()">Print</button></div>{% endif %}</div>
 
-{% if not year %}<div class="card empty"><p><b>No data yet.</b></p><p>Upload your bank statements and the report builds itself.</p><a class="btn" href="{% url 'home' %}">Upload a statement</a></div>
+{% if not has_any %}<div class="card empty"><p><b>No data yet.</b></p><p>Upload your bank statements and the report builds itself.</p><a class="btn" href="{% url 'home' %}">Upload a statement</a></div>
 {% else %}
-{% if uncat %}<div class="msg warning noprint">{{ uncat }} transaction{{ uncat|pluralize }} in this year {{ uncat|pluralize:"has,have" }} no category and {{ uncat|pluralize:"is,are" }} shown as “Other incomes (uncategorised)” or “Uncategorised expenses”. Open the statements and assign them for an exact report.</div>{% endif %}
+{% if uncat %}<div class="msg warning noprint">{{ uncat }} transaction{{ uncat|pluralize }} in this period {{ uncat|pluralize:"has,have" }} no category and {{ uncat|pluralize:"is,are" }} shown as “Other incomes (uncategorised)” or “Uncategorised expenses”. Open the statements and assign them for an exact report.</div>{% endif %}
 {% if budget_months %}<div class="msg noprint"><b>Expenses for {{ budget_months }}</b> come from the budget workbook (actual spending, item by item). Other months use bank transactions.
 {% if unmapped %}{{ unmapped }} budget line{{ unmapped|pluralize }} {{ unmapped|pluralize:"is,are" }} not yet matched to a report line. <a href="{% url 'budget_mapping' %}">Map them</a> for an exact report.{% endif %}</div>{% endif %}
 <div class="msg noprint">This report is built from bank transactions (cash basis). Items that never touch the bank, such as <b>depreciation</b> or <b>tuck shop net proceeds</b>, can be added
 {% if user.is_staff %}<a href="{% url 'admin:recon_manualentry_add' %}">as manual entries</a>{% else %}as manual entries by an administrator{% endif %}.</div>
 
 <article class="card fs">
-<header class="fs-head"><b>KENYATTA UNIVERSITY CHRISTIAN UNION (KUCU) – MAIN CAMPUS</b><br>REPORT AND FINANCIAL STATEMENTS<br>FOR THE YEAR ENDED 30 SEPTEMBER {{ year }}</header>
+<header class="fs-head"><b>KENYATTA UNIVERSITY CHRISTIAN UNION (KUCU) – MAIN CAMPUS</b><br>REPORT AND FINANCIAL STATEMENTS<br>{{ heading }}</header>
 <h2>Statement of comprehensive income</h2>
-<div class="scroll"><table class="ft"><thead><tr><th></th><th class="n">Notes</th><th class="n">{{ year }}<br>Kshs</th>{% if has_prev %}<th class="n">{{ year|add:"-1" }}<br>Kshs</th>{% endif %}</tr></thead><tbody>
+<div class="scroll"><table class="ft"><thead><tr><th></th><th class="n">Notes</th><th class="n">{{ cur_label }}<br>Kshs</th>{% if has_prev %}<th class="n">{{ prev_label }}<br>Kshs</th>{% endif %}</tr></thead><tbody>
 <tr class="sec"><td colspan="4">INCOME</td></tr>
 {% for r in income %}<tr><td>{{ r.label }}</td><td class="n">{{ r.note|default:"" }}</td><td class="n">{{ r.cur|kes }}</td>{% if has_prev %}<td class="n">{{ r.prev|kes }}</td>{% endif %}</tr>{% endfor %}
 <tr class="tot"><td>Total Income</td><td></td><td class="n">{{ total_income.cur|kes }}</td>{% if has_prev %}<td class="n">{{ total_income.prev|kes }}</td>{% endif %}</tr>
 <tr class="sec"><td colspan="4">EXPENSES</td></tr>
 {% for r in expenses %}<tr><td>{{ r.label }}</td><td class="n">{{ r.note|default:"" }}</td><td class="n">{{ r.cur|kes }}</td>{% if has_prev %}<td class="n">{{ r.prev|kes }}</td>{% endif %}</tr>{% endfor %}
 <tr class="tot"><td>Total expenses</td><td></td><td class="n">{{ total_expenses.cur|kes }}</td>{% if has_prev %}<td class="n">{{ total_expenses.prev|kes }}</td>{% endif %}</tr>
-<tr class="grand"><td>Surplus/(Deficit) for the year</td><td></td><td class="n {% if surplus.cur < 0 %}bad{% endif %}">{{ surplus.cur|kes }}</td>{% if has_prev %}<td class="n {% if surplus.prev < 0 %}bad{% endif %}">{{ surplus.prev|kes }}</td>{% endif %}</tr>
+<tr class="grand"><td>Surplus/(Deficit) for the {% if period.is_year %}year{% else %}period{% endif %}</td><td></td><td class="n {% if surplus.cur < 0 %}bad{% endif %}">{{ surplus.cur|kes }}</td>{% if has_prev %}<td class="n {% if surplus.prev < 0 %}bad{% endif %}">{{ surplus.prev|kes }}</td>{% endif %}</tr>
 </tbody></table></div>
 
 <h2 class="gap">Note 5 – Income</h2>

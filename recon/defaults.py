@@ -39,6 +39,10 @@ DEFAULTS = [
     (EX, "Computer & internet expenses", "internet,computer,wifi"),
     (EX, "Chapel Project Remittances", "chapel"),
     (EX, "Condolences", "condolence,condolences"),
+    (EX, "BS Guide purchase", "bs guide,bsguide"),
+    (EX, "Satellite campuses and interim support", "satellite,interim support"),
+    (EX, "Baptism session", "swimming pool,baptism"),
+    (EX, "Decoration expenses", "deco,decoration,decorations"),
     (SE, "Anza FYT", "anza"),
     (SE, "African Sunday", "african sunday"),
     (SE, "Worship experience", "worship experience"),
@@ -56,4 +60,7 @@ DEFAULTS = [
     (SE, "Hatua", "hatua"),
     (SE, "CM Concert", "concert"),
     (SE, "Vuka FYT", "vuka"),
+    (SE, "Hymnal Night", "hymnal"),
+    (SE, "Apologetics", "apologetics"),
+    (SE, "Thanksgiving service", "thanks giving,thanksgiving service"),
 ]

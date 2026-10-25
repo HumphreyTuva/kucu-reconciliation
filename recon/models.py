@@ -71,9 +71,28 @@ class Transaction(models.Model):
         return re.sub(r"^Transfer In From Acc\.No\. - Kes\d+ ", "", self.description, flags=re.I)
 
 
+class FinancialYear(models.Model):
+    """A reporting period with a start and end date chosen by the treasurer (it need not be Jan-Dec or Oct-Sep)."""
+    name = models.CharField(max_length=80, blank=True, help_text="Optional, e.g. 2025/26. Leave empty to use the dates.")
+    start = models.DateField()
+    end = models.DateField()
+
+    class Meta:
+        ordering = ["-end", "-start"]
+
+    @property
+    def label(self):
+        return self.name or f"{self.start:%d %b %Y} \u2013 {self.end:%d %b %Y}"
+
+    def __str__(self):
+        return f"{self.label} ({self.start:%d %b %Y} to {self.end:%d %b %Y})"
+
+
 class ManualEntry(models.Model):
     """Report items that never pass through the bank, e.g. depreciation or tuck shop net proceeds."""
-    year = models.PositiveSmallIntegerField(help_text="Financial year ending 30 September of this year, e.g. 2025.")
+    period = models.ForeignKey(FinancialYear, null=True, blank=True, on_delete=models.SET_NULL,
+                               help_text="The financial year this belongs to. Leave empty to use the year below.")
+    year = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Used only when no financial year is chosen: the year the period ends in.")
     section = models.CharField(max_length=30, choices=SECTIONS)
     label = models.CharField(max_length=80, help_text="Line name, e.g. Depreciation")
     amount = models.DecimalField(max_digits=14, decimal_places=2)
@@ -84,7 +103,7 @@ class ManualEntry(models.Model):
         verbose_name_plural = "manual report entries"
 
     def __str__(self):
-        return f"{self.year} {self.label}: {self.amount}"
+        return f"{self.period or self.year} {self.label}: {self.amount}"
 
 
 class BudgetLine(models.Model):

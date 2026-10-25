@@ -1,9 +1,9 @@
 {% extends "base.html" %}{% load recon_extras %}{% block title %}{{ title }} budget{% endblock %}
 {% block content %}
-<div class="crumb noprint"><a href="{% url 'budget' %}?year={{ fy }}">← Budget</a></div>
+<div class="crumb noprint"><a href="{% url 'budget' %}{% if p %}?p={{ p }}{% endif %}">← Budget</a></div>
 <div class="head"><div><h1>{{ title }}</h1><span class="chip">Budget vs actual spending</span></div><div class="actions"><button class="ghost" onclick="window.print()">Print</button></div></div>
-<div class="stats"><div class="stat key"><small>Actual spent</small><b>KES {{ actual|kes }}</b></div><div class="stat"><small>Budget</small><b>{{ budget|kes }}</b></div>
-<div class="stat"><small>Over (−) / under (+)</small><b class="{% if diff < 0 %}bad{% else %}ok{% endif %}">{{ diff|kes }}</b></div>
+<div class="stats"><div class="stat key"><small>Actual spent</small><b>KES {{ actual|kes }}</b></div><div class="stat"><small>Budget</small><b>{% if has_budget %}{{ budget|kes }}{% else %}–{% endif %}</b></div>
+{% if has_budget %}<div class="stat"><small>Over (−) / under (+)</small><b class="{% if diff < 0 %}bad{% else %}ok{% endif %}">{{ diff|kes }}</b></div>{% endif %}
 {% if bank %}<div class="stat"><small>Money out of bank</small><b>{{ bank|kes }}</b></div>{% endif %}</div>
 {% for g in groups %}<div class="card"><div class="hd"><h2>{{ g.name }}</h2><span class="mute small">Spent {{ g.actual|kes }} of {{ g.budget|kes }}</span></div>
 <div class="scroll"><table class="stack"><thead><tr><th>Item</th><th class="n">Actual</th><th class="n">Budget</th><th class="n">Over / under</th><th>Report line</th></tr></thead><tbody>

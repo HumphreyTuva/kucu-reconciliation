@@ -1,22 +1,40 @@
 {% extends "base.html" %}{% load recon_extras %}{% block title %}Budget{% endblock %}
 {% block content %}
-<div class="head"><div><h1>Budget and actual spending</h1><p class="sub">Upload the budget workbook to bring in every expense line, month by month. The annual report then uses the actual spending for those months.</p></div></div>
+<div class="head"><div><h1>Budget and actual spending</h1><p class="sub">Upload the budget workbook to bring in every expense line, month by month. The annual report then uses the actual spending for the months that have it.</p></div></div>
 
 <form class="card" method="post" enctype="multipart/form-data">{% csrf_token %}
 <h2 style="margin-bottom:10px">Upload the budget workbook</h2>
 <div class="bu"><div><label for="bf">Excel file (.xlsx)</label><input type="file" id="bf" name="file" accept=".xlsx,.xlsm" required></div>
-<div><label for="by">Year (optional)</label><input type="number" id="by" name="year" placeholder="{{ thisyear }}" min="2000" max="2100"><span class="small mute">Leave blank to read it from the sheet name, e.g. &ldquo;2026 BUDGET&rdquo;.</span></div>
+<div><label for="by">Year of the last month (optional)</label><input type="number" id="by" name="year" placeholder="{{ thisyear }}" min="2000" max="2100"><span class="small mute">Leave blank to use the sheet name, e.g. &ldquo;2026 BUDGET&rdquo;. Months that run past December are placed in the year before.</span></div>
 <div><button>Import</button></div></div>
-<p class="small mute" style="margin:10px 0 0">Only months that already have actual spending are imported. Upload the file again later to add new months or update old ones; a month you upload again replaces the earlier copy.</p></form>
+<div class="dates"><div><label for="bs">Financial year starts (optional)</label><input type="date" id="bs" name="start"></div><div><label for="be">Financial year ends (optional)</label><input type="date" id="be" name="end"></div>
+<p class="small mute" style="margin:0;align-self:end">Leave both empty to read every month in the workbook. If you set them, only those months are imported and the financial year is saved for the report.</p></div>
+<label class="chk"><input type="checkbox" name="fresh" value="1"> <span>Start fresh: delete all existing budget data first</span></label>
+<p class="small mute" style="margin:6px 0 0">Months with spending or a planned budget are imported. Uploading the file again replaces those months, so you can keep re-uploading an updated workbook. Your report-line choices are remembered.</p></form>
 
-{% if fy %}
-<div class="head noprint"><h2>Financial year ended 30 Sep {{ fy }}</h2>
-<div class="actions"><form method="get" class="yr"><select name="year" onchange="this.form.submit()" aria-label="Year">{% for y in years %}<option value="{{ y }}" {% if y == fy %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></form>
-<a class="btn ghost" href="{% url 'budget_mapping' %}">Map items to report lines{% if unmapped %} ({{ unmapped }} to check){% endif %}</a></div></div>
-<div class="card"><div class="scroll"><table class="stack"><thead><tr><th>Month</th><th class="n">Actual spent</th><th class="n">Budget</th><th class="n">Over (−) / under (+)</th><th class="n">Money out of bank</th></tr></thead><tbody>
-{% for r in rows %}<tr><td data-label="Month"><a href="{% url 'budget_month' r.year r.month %}"><b>{{ r.name }}</b></a></td><td class="n" data-label="Actual">{{ r.actual|kes }}</td><td class="n" data-label="Budget">{{ r.budget|kes }}</td>
-<td class="n {% if r.diff < 0 %}bad{% else %}ok{% endif %}" data-label="Over / under">{{ r.diff|kes }}</td><td class="n" data-label="Bank debits">{% if r.bank %}{{ r.bank|kes }}{% else %}<span class="mute">not uploaded</span>{% endif %}</td></tr>{% endfor %}
-</tbody><tfoot><tr><td>Total</td><td class="n" data-label="Actual">{{ tot.actual|kes }}</td><td class="n" data-label="Budget">{{ tot.budget|kes }}</td><td class="n {% if diff < 0 %}bad{% endif %}" data-label="Over / under">{{ diff|kes }}</td><td></td></tr></tfoot></table></div>
-<p class="small mute" style="margin:10px 0 0">&ldquo;Money out of bank&rdquo; is the debits on your uploaded bank statements for that month. It can differ from actual spending because of petty cash, transfers and timing. The totals here add up the individual expense lines, not the workbook&rsquo;s own subtotal rows.</p></div>
+{% if has_lines %}
+<div class="head noprint"><div><h2>{{ period.name }}</h2><span class="chip">{{ period.start|date:"j M Y" }} – {{ period.end|date:"j M Y" }}</span></div>
+<div class="actions"><form method="get" class="yr"><select name="p" onchange="this.form.submit()" aria-label="Period">{% for f in fys %}<option value="{{ f.id }}" {% if f.id|stringformat:"s" == p %}selected{% endif %}>{{ f.label }}</option>{% endfor %}<option value="all" {% if p == 'all' %}selected{% endif %}>All data</option></select></form>
+<a class="btn ghost" href="{% url 'periods' %}">Financial years</a>
+<a class="btn ghost" href="{% url 'budget_mapping' %}{% if unmapped %}?show=unmapped{% endif %}">Map items to report lines{% if unmapped %} ({{ unmapped }} to check){% endif %}</a></div></div>
+
+<div class="stats">
+<div class="stat key"><small>Planned budget (whole period)</small><b>{{ tot.budget_all|kes }}</b></div>
+<div class="stat"><small>Spent so far ({{ months_spent }} month{{ months_spent|pluralize }})</small><b>{{ tot.spent|kes }}</b></div>
+<div class="stat"><small>Over (−) / under (+) so far</small><b class="{% if diff < 0 %}bad{% else %}ok{% endif %}">{{ diff|kes }}</b></div>
+<div class="stat"><small>Planned for months not spent yet</small><b>{{ remaining|kes }}</b></div></div>
+
+<div class="card"><div class="scroll"><table class="stack"><thead><tr><th>Month</th><th class="n">Actual spent</th><th class="n">Budget</th><th class="n">Over (−) / under (+)</th><th class="n">Money out of bank</th><th class="noprint"></th></tr></thead><tbody>
+{% for r in rows %}<tr class="{% if r.status == 'none' %}dim{% endif %}"><td data-label="Month">{% if r.status != 'none' %}<a href="{% url 'budget_month' r.year r.month %}?p={{ p }}"><b>{{ r.name }}</b></a>{% else %}<b>{{ r.name }}</b>{% endif %}
+{% if r.status == 'planned' %}<span class="pill warn">Planned</span>{% elif r.status == 'none' %}<span class="mute small">no data</span>{% endif %}</td>
+<td class="n" data-label="Actual">{% if r.status == 'actual' %}{{ r.actual|kes }}{% else %}–{% endif %}</td>
+<td class="n" data-label="Budget">{% if r.has_budget %}{{ r.budget|kes }}{% else %}–{% endif %}</td>
+<td class="n {% if r.status == 'actual' and r.has_budget and r.diff < 0 %}bad{% elif r.status == 'actual' and r.has_budget %}ok{% endif %}" data-label="Over / under">{% if r.status == 'actual' and r.has_budget %}{{ r.diff|kes }}{% else %}–{% endif %}</td>
+<td class="n" data-label="Bank debits">{% if r.bank %}{{ r.bank|kes }}{% else %}<span class="mute">not uploaded</span>{% endif %}</td>
+<td class="noprint">{% if r.status != 'none' %}<form method="post" action="{% url 'budget_delete' %}" onsubmit="return confirm('Delete the budget lines for {{ r.name }}?')">{% csrf_token %}<input type="hidden" name="scope" value="month"><input type="hidden" name="year" value="{{ r.year }}"><input type="hidden" name="month" value="{{ r.month }}"><input type="hidden" name="p" value="{{ p }}"><button class="ghost danger sm">Delete</button></form>{% endif %}</td></tr>{% endfor %}
+</tbody><tfoot><tr><td>Total</td><td class="n" data-label="Actual">{{ tot.spent|kes }}</td><td class="n" data-label="Budget">{{ tot.budget_all|kes }}</td><td class="n {% if diff < 0 %}bad{% endif %}" data-label="Over / under so far">{{ diff|kes }}</td><td></td><td class="noprint"></td></tr></tfoot></table></div>
+<p class="small mute" style="margin:10px 0 0">&ldquo;Money out of bank&rdquo; is the debits on your uploaded bank statements for that month. It can differ from actual spending because of petty cash, transfers and timing. Totals add up the individual expense lines, not the workbook&rsquo;s own subtotal rows. Over/under compares only months that have both spending and a budget.</p></div>
+<form method="post" action="{% url 'budget_delete' %}" class="noprint" onsubmit="return confirm('Delete the budget lines for {{ period.name }}? You can import the workbook again afterwards.')">{% csrf_token %}<input type="hidden" name="scope" value="period"><input type="hidden" name="p" value="{{ p }}">
+<button class="ghost danger">Delete the budget data for {{ period.name }}</button> <span class="small mute">You can also manage individual lines in the Admin under &ldquo;Budget lines&rdquo;.</span></form>
 {% else %}<div class="card empty"><p><b>No budget uploaded yet.</b></p><p>Choose your budget workbook above to get started.</p></div>{% endif %}
 {% endblock %}

@@ -118,3 +118,13 @@ textarea:focus{border-color:var(--brand)}
 @media(max-width:720px){.sup-hero{flex-direction:column;text-align:center;padding:22px}.sup-hero img{max-width:70%}.hf{grid-template-columns:1fr}}
 @media print{.sup-hero,.contacts{display:none}}
 .bu{display:grid;grid-template-columns:2fr 1fr auto;gap:14px;align-items:end}.bu input[type=file]{padding:8px;background:#fff}@media(max-width:720px){.bu{grid-template-columns:1fr}}
+.newline{display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:6px}.newline[hidden]{display:none}.newline select{min-width:150px}@media(max-width:720px){.newline{grid-template-columns:1fr}}
+.chk{display:flex;gap:8px;align-items:center;margin-top:12px;font-weight:500}.chk input{width:18px;height:18px;accent-color:var(--brand)}
+tr.dim td{color:var(--mute)}tr.dim:hover{background:transparent}button.sm{padding:5px 10px;font-size:13px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}.tabs>a{padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--ink);text-decoration:none;font-weight:500}
+.tabs>a b{background:var(--brand-l);color:var(--brand);border-radius:99px;padding:1px 8px;margin-left:4px;font-size:13px}.tabs>a.on{background:var(--brand);border-color:var(--brand);color:#fff}.tabs>a.on b{background:rgba(255,255,255,.2);color:#fff}
+.tsearch{display:flex;gap:6px;margin:0 0 0 auto}.tsearch input{width:230px}@media(max-width:720px){.tsearch{margin:0;width:100%}.tsearch input{flex:1;width:auto}}
+.dates{display:grid;grid-template-columns:1fr 1fr 2fr;gap:14px;margin-top:14px}input[type=date]{font:inherit;color:var(--ink);background:#fff;border:1px solid #cdd2e3;border-radius:9px;padding:9px 11px;width:100%}
+.pf{display:grid;grid-template-columns:1fr 1fr 1.4fr auto;gap:14px;align-items:end}.row2{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 0}
+.btn.sm{padding:5px 10px;font-size:13px}.list li>.row2{border-bottom:1px solid var(--line)}.list li:last-child>.row2{border:0}
+@media(max-width:720px){.dates,.pf{grid-template-columns:1fr}}

@@ -15,8 +15,11 @@ urlpatterns = [
     path("transaction/<int:pk>/category/", views.set_category, name="set_category"),
     path("categories/", views.categories, name="categories"),
     path("budget/", views.budget, name="budget"),
+    path("budget/delete/", views.budget_delete, name="budget_delete"),
     path("budget/mapping/", views.budget_mapping, name="budget_mapping"),
+    path("budget/mapping/auto/", views.budget_automap, name="budget_automap"),
     path("budget/<int:year>/<int:month>/", views.budget_month, name="budget_month"),
+    path("periods/", views.periods, name="periods"),
     path("report/", views.report, name="report"),
     path("report/export/", views.report_export, name="report_export"),
 ]

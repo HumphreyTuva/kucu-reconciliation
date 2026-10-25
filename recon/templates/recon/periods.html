@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}Financial years{% endblock %}
+{% block content %}
+<h1>Financial years</h1>
+<p class="sub">Your financial year can start in any month. Set its first and last day here and the Budget page and the Annual report will use it. If you set nothing, everything you have uploaded is used ({{ bounds.0|date:"j M Y" }} to {{ bounds.1|date:"j M Y" }}).</p>
+<form class="card" method="post">{% csrf_token %}<input type="hidden" name="action" value="add">
+<h2 style="margin-bottom:10px">Add a financial year</h2>
+<div class="pf"><div><label for="fs">First day</label><input type="date" id="fs" name="start" required></div>
+<div><label for="fe">Last day</label><input type="date" id="fe" name="end" required></div>
+<div><label for="fn">Name (optional)</label><input type="text" id="fn" name="name" maxlength="80" placeholder="e.g. 2025/26"></div>
+<div><button>Add</button></div></div></form>
+<div class="card"><div class="hd"><h2>Your financial years</h2></div>
+{% if fys %}<ul class="list">{% for f in fys %}<li><div class="row2"><span><span class="nm">{{ f.label }}</span><br><span class="mute small">{{ f.start|date:"j M Y" }} to {{ f.end|date:"j M Y" }}</span></span>
+<span class="row"><a class="btn ghost sm" href="{% url 'budget' %}?p={{ f.id }}">Budget</a><a class="btn ghost sm" href="{% url 'report' %}?p={{ f.id }}">Report</a>
+<form method="post" onsubmit="return confirm('Remove this financial year? Your uploaded data is not deleted.')" style="margin:0">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ f.id }}"><button class="ghost danger sm">Remove</button></form></span></div></li>{% endfor %}</ul>
+{% else %}<div class="empty">No financial year set. Pages show everything you have uploaded.</div>{% endif %}</div>
+{% endblock %}

@@ -15,7 +15,7 @@ from django.views.decorators.http import require_POST
 
 from .budget import BANK_ONLY
 from .forms import CategoryFormSet, UploadForm
-from .models import SECTIONS, BudgetLine, Category, ItemMap, ManualEntry, Statement, Transaction
+from .models import SECTIONS, BudgetLine, Category, FinancialYear, ItemMap, ManualEntry, Statement, Transaction
 from .services import StatementError, categorise, import_statement, parse_statement
 
 SEC_LABEL = dict(SECTIONS)
@@ -194,18 +194,128 @@ def categories(request):
     return render(request, "recon/categories.html", {"formset": fs})
 
 
+# -------------------------------------------------------------------- periods
+from dataclasses import dataclass
+from datetime import datetime as _dt
+
+
+def _shift(d, years):
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:  # 29 February
+        return d.replace(year=d.year + years, day=28)
+
+
+@dataclass
+class Period:
+    id: str
+    name: str
+    start: date
+    end: date
+    defined: bool
+
+    def prior(self):
+        return Period("prior", "", _shift(self.start, -1), _shift(self.end, -1), False)
+
+    def months(self):
+        out, y, m = [], self.start.year, self.start.month
+        while (y, m) <= (self.end.year, self.end.month):
+            out.append((y, m))
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        return out
+
+    @property
+    def is_year(self):
+        return self.defined and 330 <= (self.end - self.start).days + 1 <= 400
+
+    @property
+    def heading(self):
+        if self.is_year:
+            return f"FOR THE YEAR ENDED {self.end:%d %B %Y}".upper()
+        return f"FOR THE PERIOD {self.start:%d %B %Y} TO {self.end:%d %B %Y}".upper()
+
+    @property
+    def cur_label(self):
+        return str(self.end.year) if self.is_year else f"{self.start:%b %Y} - {self.end:%b %Y}"
+
+    @property
+    def prev_label(self):
+        p = self.prior()
+        return str(p.end.year) if self.is_year else f"{p.start:%b %Y} - {p.end:%b %Y}"
+
+    def month_filter(self):
+        sy, sm, ey, em = self.start.year, self.start.month, self.end.year, self.end.month
+        return (Q(year__gt=sy) | Q(year=sy, month__gte=sm)) & (Q(year__lt=ey) | Q(year=ey, month__lte=em))
+
+
+def data_bounds(budget_only=False):
+    """First and last day covered by what has been uploaded."""
+    months = list(BudgetLine.objects.values_list("year", "month").distinct())
+    starts = [date(y, m, 1) for y, m in months]
+    ends = [date(y, m, calendar.monthrange(y, m)[1]) for y, m in months]
+    if not budget_only:
+        t = Transaction.objects.exclude(date=None).aggregate(a=Min("date"), b=Max("date"))
+        starts += [x for x in (t["a"],) if x]
+        ends += [x for x in (t["b"],) if x]
+    if not starts:
+        return date.today(), date.today()
+    return min(starts), max(ends)
+
+
+def resolve_period(request, budget_only=False):
+    """The financial year chosen with ?p=<id>, else the latest one you set up, else everything uploaded."""
+    fys = list(FinancialYear.objects.all())
+    p = request.GET.get("p", "")
+    chosen = next((f for f in fys if str(f.id) == p), None) if p and p != "all" else None
+    if chosen is None and not p and fys:
+        chosen = fys[0]
+    if chosen:
+        return Period(str(chosen.id), chosen.label, chosen.start, chosen.end, True), fys
+    start, end = data_bounds(budget_only)
+    return Period("all", "All data", start, end, False), fys
+
+
+def _fy_name(start, end):
+    if 330 <= (end - start).days + 1 <= 400:
+        return str(end.year) if start.year == end.year else f"{start.year}/{str(end.year)[-2:]}"
+    return f"{start:%b %Y} - {end:%b %Y}"
+
+
+def _parse_date(text):
+    try:
+        return _dt.strptime((text or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+@login_required
+def periods(request):
+    if request.method == "POST":
+        if request.POST.get("action") == "delete":
+            FinancialYear.objects.filter(pk=request.POST.get("id")).delete()
+            messages.success(request, "Financial year removed. Nothing else was deleted.")
+        else:
+            start, end = _parse_date(request.POST.get("start")), _parse_date(request.POST.get("end"))
+            if not start or not end or end < start:
+                messages.error(request, "Enter a start date and an end date that comes after it.")
+            else:
+                FinancialYear.objects.get_or_create(start=start, end=end, defaults={"name": request.POST.get("name", "").strip()[:80] or _fy_name(start, end)})
+                messages.success(request, "Financial year added.")
+        return redirect("periods")
+    return render(request, "recon/periods.html", {"fys": FinancialYear.objects.all(), "bounds": data_bounds()})
+
+
 # -------------------------------------------------------------------- report
-def fy_of(d):
-    """Financial year ends 30 September."""
-    return d.year + (1 if d.month >= 10 else 0)
-
-
-def year_data(y):
-    qs = Transaction.objects.filter(date__range=(date(y - 1, 10, 1), date(y, 9, 30)))
+def year_data(period, prior=False):
+    start, end = period.start, period.end
+    qs = Transaction.objects.filter(date__range=(start, end))
     # Months covered by the budget workbook take their expenses from its itemised actuals, not from bank debits
     # (the same spending would otherwise be counted twice).
-    bud = list(BudgetLine.objects.filter(Q(year=y - 1, month__gte=10) | Q(year=y, month__lte=9)).select_related("category"))
-    bud_months = sorted({(b.year, b.month) for b in bud})
+    bud = list(BudgetLine.objects.filter(period.month_filter()).select_related("category"))
+    spent = defaultdict(lambda: ZERO)
+    for b in bud:
+        spent[(b.year, b.month)] += b.actual
+    bud_months = sorted(k for k, v in spent.items() if v > 0)  # planned-only months do not replace bank debits
     in_budget_month = Q()
     for yy, mm in bud_months:
         in_budget_month |= Q(date__year=yy, date__month=mm)
@@ -223,6 +333,8 @@ def year_data(y):
             else:
                 amt[fallback] += r["t"]; uncat += r["n"]
     for b in bud:
+        if not b.actual:
+            continue
         cat = b.category
         if cat and cat.section.startswith("ex_"):
             continue
@@ -231,15 +343,24 @@ def year_data(y):
         else:
             amt[("out_1_expenses", "Other expenses (not yet mapped)")] += b.actual
             unmapped += 1
-    manual = list(ManualEntry.objects.filter(year=y))
+    if prior:
+        mq = Q(period__isnull=True, year=end.year) | Q(period__end__range=(start, end))
+    elif period.defined:
+        mq = Q(period_id=int(period.id)) | Q(period__isnull=True, year=end.year)
+    else:
+        mq = Q()  # all data: every manual entry
+    manual = list(ManualEntry.objects.filter(mq))
     for m in manual:
         amt[(m.section, m.label)] += m.amount
     return amt, uncat, qs.exists() or bool(manual) or bool(bud), bud_months, unmapped
 
 
-def build_report(y):
-    cur, uncat, has_cur, bud_months, unmapped = year_data(y)
-    prev, _, has_prev, _, _ = year_data(y - 1)
+def build_report(period):
+    cur, uncat, has_cur, bud_months, unmapped = year_data(period)
+    if period.defined:
+        prev, _, has_prev, _, _ = year_data(period.prior(), prior=True)
+    else:
+        prev, has_prev = defaultdict(lambda: ZERO), False
 
     def rows(sec):
         names = [c.name for c in Category.objects.filter(section=sec)]
@@ -256,7 +377,8 @@ def build_report(y):
     tot = lambda rs, f: sum((r[f] for r in rs), ZERO)
     ti, te = {f: tot(income, f) for f in ("cur", "prev")}, {f: tot(expenses, f) for f in ("cur", "prev")}
     return {
-        "year": y, "income": income, "expenses": expenses, "total_income": ti, "total_expenses": te,
+        "heading": period.heading, "cur_label": period.cur_label, "prev_label": period.prev_label,
+        "income": income, "expenses": expenses, "total_income": ti, "total_expenses": te,
         "surplus": {f: ti[f] - te[f] for f in ("cur", "prev")},
         "note5": [(title, S[k]) for title, k in (("Tithes and Offering", "in_1_tithes_offering"),
                                                   ("Net proceeds from projects", "in_2_projects"), ("Other income", "in_3_other"))],
@@ -265,47 +387,31 @@ def build_report(y):
     }
 
 
-def _years():
-    ys = {fy_of(d) for d in Transaction.objects.exclude(date=None).dates("date", "month")}
-    ys |= set(ManualEntry.objects.values_list("year", flat=True))
-    ys |= {fy_of(date(yy, mm, 1)) for yy, mm in BudgetLine.objects.values_list("year", "month").distinct()}
-    return sorted(ys, reverse=True)
-
-
-def _pick_year(request):
-    ys = _years()
-    try:
-        y = int(request.GET.get("year", ""))
-    except ValueError:
-        y = ys[0] if ys else None
-    return y, ys
-
-
 @login_required
 def report(request):
-    y, ys = _pick_year(request)
-    ctx = {"years": ys, "year": y}
-    if y:
-        ctx.update(build_report(y))
+    period, fys = resolve_period(request)
+    has_any = Transaction.objects.exists() or BudgetLine.objects.exists() or ManualEntry.objects.exists()
+    ctx = {"fys": fys, "period": period, "p": period.id, "has_any": has_any}
+    if has_any:
+        ctx.update(build_report(period))
     return render(request, "recon/report.html", ctx)
 
 
 @login_required
 def report_export(request):
-    y, _ = _pick_year(request)
-    if not y:
-        return redirect("report")
-    r = build_report(y)
+    period, _ = resolve_period(request)
+    r = build_report(period)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Income statement"
     for t in ("KENYATTA UNIVERSITY CHRISTIAN UNION (KUCU) - MAIN CAMPUS", "REPORT AND FINANCIAL STATEMENTS",
-              f"FOR THE YEAR ENDED 30 SEPTEMBER {y}", "STATEMENT OF COMPREHENSIVE INCOME", ""):
+              r["heading"], "STATEMENT OF COMPREHENSIVE INCOME", ""):
         ws.append([t])
-    ws.append(["", "Notes", f"{y} Kshs", f"{y - 1} Kshs"])
+    head = ["", "Notes", f"{r['cur_label']} Kshs"] + ([f"{r['prev_label']} Kshs"] if r["has_prev"] else [])
+    ws.append(head)
 
     def put(label, note, c, p, bold=False):
-        ws.append([label, note, float(c), float(p)])
+        ws.append([label, note, float(c)] + ([float(p)] if r["has_prev"] else []))
         for cell in ws[ws.max_row]:
             cell.font = openpyxl.styles.Font(bold=bold)
         for cell in ws[ws.max_row][2:]:
@@ -320,26 +426,30 @@ def report_export(request):
         put(x["label"], x.get("note"), x["cur"], x["prev"])
     put("Total expenses", None, r["total_expenses"]["cur"], r["total_expenses"]["prev"], True)
     ws.append([])
-    put("Surplus/(Deficit) for the year", None, r["surplus"]["cur"], r["surplus"]["prev"], True)
+    put("Surplus/(Deficit) for the period", None, r["surplus"]["cur"], r["surplus"]["prev"], True)
     ws.column_dimensions["A"].width = 52
     for c in "CD":
         ws.column_dimensions[c].width = 16
     notes = wb.create_sheet("Notes")
-    notes.append(["NOTE 5 - INCOME", "", f"{y} Kshs", f"{y - 1} Kshs"])
-    for title, (rows, tc, tp) in r["note5"]:
+
+    def nrow(label, cur, prev):
+        notes.append([label, "", float(cur)] + ([float(prev)] if r["has_prev"] else []))
+
+    notes.append(["NOTE 5 - INCOME", "", f"{r['cur_label']} Kshs"] + ([f"{r['prev_label']} Kshs"] if r["has_prev"] else []))
+    for title, (rows_, tc, tp) in r["note5"]:
         notes.append([title])
-        for x in rows:
-            notes.append([x["label"], "", float(x["cur"]), float(x["prev"])])
-        notes.append([f"Total {title.lower()}", "", float(tc), float(tp)])
+        for x in rows_:
+            nrow(x["label"], x["cur"], x["prev"])
+        nrow(f"Total {title.lower()}", tc, tp)
     notes.append([]); notes.append(["NOTE 6 - SPECIAL EVENTS"])
     for x in r["note6"][0]:
-        notes.append([x["label"], "", float(x["cur"]), float(x["prev"])])
-    notes.append(["Total special events", "", float(r["note6"][1]), float(r["note6"][2])])
+        nrow(x["label"], x["cur"], x["prev"])
+    nrow("Total special events", r["note6"][1], r["note6"][2])
     notes.column_dimensions["A"].width = 52
     for rw in notes.iter_rows(min_col=3, max_col=4):
         for cell in rw:
             cell.number_format = '#,##0;(#,##0);"-"'
-    return _xlsx_response(wb, f"KUCU-financial-report-{y}")
+    return _xlsx_response(wb, f"KUCU-financial-report-{period.end:%Y%m%d}")
 
 
 # ----------------------------------------------------------------------- PWA
@@ -384,11 +494,11 @@ def support(request):
 
 
 # -------------------------------------------------------------------- budget
-from .budget import import_budget, norm, parse_budget
+from .budget import automap_unmapped, import_budget, norm, parse_budget
 
 
-def fy_months(fy):
-    return [(fy - 1, m) for m in (10, 11, 12)] + [(fy, m) for m in range(1, 10)]
+def _names(months):
+    return ", ".join(f"{calendar.month_abbr[m]} {y}" for y, m in months)
 
 
 @login_required
@@ -396,41 +506,84 @@ def budget(request):
     if request.method == "POST":
         f = request.FILES.get("file")
         year = request.POST.get("year", "").strip()
+        start, end = _parse_date(request.POST.get("start")), _parse_date(request.POST.get("end"))
         if not f:
             messages.error(request, "Choose the budget workbook first.")
+        elif (request.POST.get("start") or request.POST.get("end")) and not (start and end and end >= start):
+            messages.error(request, "Set both the start and the end date of the financial year, or leave both empty to read everything in the workbook.")
         else:
             try:
-                parsed = parse_budget(f, int(year) if year.isdigit() else None)
-                months = import_budget(parsed)
+                parsed = parse_budget(f, int(year) if year.isdigit() else None, start, end)
+                if request.POST.get("fresh") == "1":  # start fresh: remove everything imported before
+                    BudgetLine.objects.all().delete()
+                done = import_budget(parsed)
             except StatementError as e:
                 messages.error(request, f"{f.name}: {e}")
             else:
-                if months:
-                    names = ", ".join(f"{calendar.month_abbr[m]} {y}" for y, m in months)
-                    messages.success(request, f"Imported actual spending and budget for {names} ({len(parsed['lines'])} lines read from sheet \u201c{parsed['sheet']}\u201d).")
+                if done["actual"] or done["planned"]:
+                    msg = f"Imported {len(parsed['lines'])} lines from sheet \u201c{parsed['sheet']}\u201d. "
+                    if done["actual"]:
+                        msg += f"Spending found for: {_names(done['actual'])}. "
+                    if done["planned"]:
+                        msg += f"Planned budget only: {_names(done['planned'])}."
+                    messages.success(request, msg.strip())
                 else:
-                    messages.warning(request, "No month in this workbook has actual spending yet, so nothing was imported.")
+                    messages.warning(request, "This workbook has no spending or budget figures yet, so nothing was imported.")
+                if done["empty"]:
+                    messages.info(request, f"Nothing recorded in the workbook for: {_names(done['empty'])}.")
                 if parsed["ignored"]:
                     messages.info(request, "Skipped: " + "; ".join(parsed["ignored"]) + ".")
-                return redirect("budget")
-    ys = sorted({fy_of(date(yy, mm, 1)) for yy, mm in BudgetLine.objects.values_list("year", "month").distinct()}, reverse=True)
-    try:
-        fy = int(request.GET.get("year", ""))
-    except ValueError:
-        fy = ys[0] if ys else None
-    rows, tot = [], {"actual": ZERO, "budget": ZERO}
-    if fy:
-        for yy, mm in fy_months(fy):
+                if start and end:
+                    fy, made = FinancialYear.objects.get_or_create(start=start, end=end, defaults={"name": _fy_name(start, end)})
+                    if made:
+                        messages.info(request, f"Financial year {fy.label} ({start:%d %b %Y} to {end:%d %b %Y}) was saved. Change it under Financial years.")
+                    return redirect(f"/budget/?p={fy.id}")
+                return redirect("/budget/?p=all")
+    period, fys = resolve_period(request, budget_only=True)
+    rows, tot = [], {"spent": ZERO, "budget_all": ZERO, "spent_cmp": ZERO, "budget_cmp": ZERO, "planned": ZERO}
+    has_lines = BudgetLine.objects.exists()
+    if has_lines:
+        for yy, mm in period.months():
             a = BudgetLine.objects.filter(year=yy, month=mm).aggregate(a=Sum("actual"), b=Sum("budget"), n=Count("id"))
-            if not a["n"]:
-                continue
+            has, act = a["n"] > 0, (a["a"] or ZERO) > 0
             bank = Transaction.objects.filter(date__year=yy, date__month=mm, debit__gt=0).aggregate(t=Sum("debit"))["t"]
-            rows.append({"year": yy, "month": mm, "name": f"{calendar.month_name[mm]} {yy}", "actual": a["a"], "budget": a["b"],
-                         "diff": a["b"] - a["a"], "bank": bank})
-            tot["actual"] += a["a"]; tot["budget"] += a["b"]
+            budget_m, actual_m = a["b"] or ZERO, a["a"] or ZERO
+            rows.append({"year": yy, "month": mm, "name": f"{calendar.month_name[mm]} {yy}", "status": "actual" if act else "planned" if has else "none",
+                         "actual": actual_m, "budget": budget_m, "has_budget": budget_m > 0, "diff": budget_m - actual_m, "bank": bank})
+            tot["budget_all"] += budget_m
+            if has and not act:
+                tot["planned"] += budget_m  # budgeted for months that have no spending yet
+            if act:
+                tot["spent"] += actual_m
+                if budget_m > 0:  # compare only months that have both
+                    tot["spent_cmp"] += actual_m
+                    tot["budget_cmp"] += budget_m
     unmapped = BudgetLine.objects.filter(category__isnull=True).values("item").distinct().count()
-    return render(request, "recon/budget.html", {"years": ys, "fy": fy, "rows": rows, "tot": tot, "diff": tot["budget"] - tot["actual"],
-                                                  "unmapped": unmapped, "thisyear": date.today().year})
+    return render(request, "recon/budget.html", {
+        "period": period, "p": period.id, "fys": fys, "rows": rows, "tot": tot, "has_lines": has_lines,
+        "diff": tot["budget_cmp"] - tot["spent_cmp"], "remaining": tot["planned"],
+        "months_spent": sum(1 for r in rows if r["status"] == "actual"), "unmapped": unmapped})
+
+
+@login_required
+@require_POST
+def budget_delete(request):
+    scope, p = request.POST.get("scope"), request.POST.get("p", "")
+    try:
+        if scope == "month":
+            n = BudgetLine.objects.filter(year=int(request.POST["year"]), month=int(request.POST["month"])).delete()[0]
+            messages.success(request, f"Deleted {n} budget lines for {calendar.month_name[int(request.POST['month'])]} {request.POST['year']}.")
+        elif scope == "period":
+            fy = FinancialYear.objects.filter(pk=p).first() if p.isdigit() else None
+            if fy:
+                n = BudgetLine.objects.filter(Period(str(fy.id), "", fy.start, fy.end, True).month_filter()).delete()[0]
+                messages.success(request, f"Deleted {n} budget lines in {fy.label}. Your report-line choices are kept, so a fresh import maps itself.")
+            else:
+                n = BudgetLine.objects.all().delete()[0]
+                messages.success(request, f"Deleted all {n} budget lines. Your report-line choices are kept, so a fresh import maps itself.")
+    except (KeyError, ValueError):
+        messages.error(request, "Nothing was deleted.")
+    return redirect(f"/budget/?p={p}" if p else "budget")
 
 
 @login_required
@@ -452,14 +605,13 @@ def budget_month(request, year, month):
     ta, tb = sum((g["actual"] for g in out), ZERO), sum((g["budget"] for g in out), ZERO)
     bank = Transaction.objects.filter(date__year=year, date__month=month, debit__gt=0).aggregate(t=Sum("debit"))["t"]
     return render(request, "recon/budget_month.html", {"title": f"{calendar.month_name[month]} {year}", "groups": out, "actual": ta,
-                                                        "budget": tb, "diff": tb - ta, "bank": bank, "fy": fy_of(date(year, month, 1))})
+                                                        "budget": tb, "diff": tb - ta, "bank": bank, "p": request.GET.get("p", ""), "has_budget": tb > 0})
 
 
 @login_required
 def budget_mapping(request):
     cats = [c for c in Category.objects.filter(is_active=True) if c.section.startswith("out_") or c.is_excluded]
     if request.method == "POST":
-        changed = 0
         names = list(BudgetLine.objects.values_list("item", flat=True).distinct())
         by_key = defaultdict(list)
         for n in names:
@@ -468,21 +620,57 @@ def budget_mapping(request):
             if not key.startswith("map_"):
                 continue
             k = key[4:]
-            cat = Category.objects.filter(pk=value).first() if value else None
+            if value == "__new__":  # a report line typed in on this page
+                name = request.POST.get(f"newname_{k}", "").strip()[:80]
+                sec = request.POST.get(f"newsec_{k}", "out_1_expenses")
+                if not name:
+                    continue
+                if sec not in ("out_1_expenses", "out_2_special_events"):
+                    sec = "out_1_expenses"
+                cat = Category.objects.filter(name__iexact=name, section=sec).first() or \
+                    Category.objects.create(name=name, section=sec, keywords="", order=200)
+            else:
+                cat = Category.objects.filter(pk=value).first() if value else None
             if cat:
                 ItemMap.objects.update_or_create(key=k, defaults={"category": cat})
             else:
                 ItemMap.objects.filter(key=k).delete()
-            changed += BudgetLine.objects.filter(item__in=by_key.get(k, [])).update(category=cat)
+            BudgetLine.objects.filter(item__in=by_key.get(k, [])).update(category=cat)
         messages.success(request, "Mapping saved. The annual report now uses it.")
-        return redirect("budget_mapping")
+        return redirect(request.get_full_path())  # stay on the same filter
     agg = {}
     for l in BudgetLine.objects.select_related("category"):
         k = norm(l.item)
-        a = agg.setdefault(k, {"key": k, "item": l.item, "groups": set(), "actual": ZERO, "cat": l.category_id})
+        a = agg.setdefault(k, {"key": k, "item": l.item, "groups": set(), "actual": ZERO, "budget": ZERO, "cat": None, "unmapped": False})
         a["actual"] += l.actual
+        a["budget"] += l.budget
         a["groups"].add(l.group)
-    items = sorted(agg.values(), key=lambda a: -a["actual"])
+        if l.category_id:
+            a["cat"] = a["cat"] or l.category_id
+        else:
+            a["unmapped"] = True
+    items = sorted(agg.values(), key=lambda a: (-a["actual"], -a["budget"]))
+    counts = {"all": len(items), "unmapped": sum(1 for a in items if a["unmapped"])}
+    counts["mapped"] = counts["all"] - counts["unmapped"]
+    show = request.GET.get("show", "all")
+    if show not in ("all", "unmapped", "mapped"):
+        show = "all"
+    q = request.GET.get("q", "").strip().lower()
+    if show == "unmapped":
+        items = [a for a in items if a["unmapped"]]
+    elif show == "mapped":
+        items = [a for a in items if not a["unmapped"]]
     for a in items:
         a["groups"] = ", ".join(sorted(g for g in a["groups"] if g))
-    return render(request, "recon/budget_mapping.html", {"items": items, "groups": groups(cats)})
+    if q:
+        items = [a for a in items if q in a["item"].lower() or q in a["groups"].lower()]
+    return render(request, "recon/budget_mapping.html", {"items": items, "groups": groups(cats), "show": show, "q": q, "counts": counts})
+
+
+@login_required
+@require_POST
+def budget_automap(request):
+    n = automap_unmapped()
+    messages.success(request, f"{n} budget line{'s were' if n != 1 else ' was'} matched to a report line." if n else
+                              "Nothing new could be matched automatically. Choose the report line yourself for the rest.")
+    return redirect("budget_mapping")

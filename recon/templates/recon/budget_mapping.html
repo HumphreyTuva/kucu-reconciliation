@@ -2,11 +2,19 @@
 {% block content %}
 <div class="crumb noprint"><a href="{% url 'budget' %}">← Budget</a></div>
 <h1>Map budget items to report lines</h1>
-<p class="sub">Choose which line of the annual report each budget item belongs to, for example &ldquo;Speakers Food&rdquo; under Refreshments. Your choice is remembered for every month and for future uploads. Items left blank appear in the report as &ldquo;Other expenses (not yet mapped)&rdquo;.</p>
-<form method="post" class="card">{% csrf_token %}
-<div class="scroll"><table class="stack"><thead><tr><th>Budget item</th><th>Department</th><th class="n">Actual spent</th><th>Report line</th></tr></thead><tbody>
-{% for a in items %}<tr><td data-label="Item"><b>{{ a.item }}</b></td><td data-label="Department" class="mute">{{ a.groups }}</td><td class="n" data-label="Actual">{{ a.actual|kes }}</td>
-<td data-label="Report line"><select name="map_{{ a.key }}"><option value="">Not mapped</option>
-{% for label, cs in groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if a.cat == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></td></tr>{% endfor %}
+<p class="sub">Choose which line of the annual report each budget item belongs to, for example &ldquo;Speakers Food&rdquo; under Refreshments. Your choice is remembered for every month and for future uploads. Use the tabs below to work through the items that are not mapped yet. Items left blank appear in the report as &ldquo;Other expenses (not yet mapped)&rdquo;.</p>
+<div class="tabs noprint"><a href="?show=unmapped{% if q %}&q={{ q }}{% endif %}" class="{% if show == 'unmapped' %}on{% endif %}">Not mapped <b>{{ counts.unmapped }}</b></a>
+<a href="?show=mapped{% if q %}&q={{ q }}{% endif %}" class="{% if show == 'mapped' %}on{% endif %}">Mapped <b>{{ counts.mapped }}</b></a>
+<a href="?show=all{% if q %}&q={{ q }}{% endif %}" class="{% if show == 'all' %}on{% endif %}">All items <b>{{ counts.all }}</b></a>
+<form method="get" class="tsearch"><input type="hidden" name="show" value="{{ show }}"><input type="text" name="q" value="{{ q }}" placeholder="Search items or departments" aria-label="Search"><button class="ghost">Search</button></form></div>
+<form method="post" action="{% url 'budget_automap' %}" class="noprint" style="margin:0 0 14px">{% csrf_token %}<button class="ghost">Match items automatically</button> <span class="small mute">Applies the keyword rules to items that have no report line yet. Your own choices are never changed.</span></form>
+<form method="post" class="card">{% csrf_token %}{% if not items %}<div class="empty">{% if show == 'unmapped' and not q %}Everything is mapped. 🎉{% else %}No items match this view.{% endif %}</div>{% endif %}
+<div class="scroll"><table class="stack"><thead><tr><th>Budget item</th><th>Department</th><th class="n">Actual spent</th><th class="n">Budget</th><th>Report line</th></tr></thead><tbody>
+{% for a in items %}<tr><td data-label="Item"><b>{{ a.item }}</b></td><td data-label="Department" class="mute">{{ a.groups }}</td><td class="n" data-label="Actual">{{ a.actual|kes }}</td><td class="n" data-label="Budget">{{ a.budget|kes }}</td>
+<td data-label="Report line"><select name="map_{{ a.key }}" class="mapsel"><option value="">Not mapped</option><option value="__new__">＋ Create a new report line…</option>
+{% for label, cs in groups %}<optgroup label="{{ label }}">{% for c in cs %}<option value="{{ c.id }}" {% if a.cat == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+<div class="newline" hidden><input type="text" name="newname_{{ a.key }}" placeholder="Name of the new line, e.g. Hymnal Night" maxlength="80">
+<select name="newsec_{{ a.key }}"><option value="out_1_expenses">General expense</option><option value="out_2_special_events">Special event</option></select></div></td></tr>{% endfor %}
 </tbody></table></div><div class="upload-actions"><button>Save mapping</button></div></form>
+<script>document.querySelectorAll(".mapsel").forEach(s=>s.addEventListener("change",()=>{const n=s.parentElement.querySelector(".newline");n.hidden=s.value!=="__new__";if(!n.hidden)n.querySelector("input").focus()}));</script>
 {% endblock %}
