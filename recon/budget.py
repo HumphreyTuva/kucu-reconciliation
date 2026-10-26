@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 import openpyxl
 from openpyxl.utils import get_column_letter as L
 
+from .defaults import DEFAULTS, RETIRED
 from .models import BudgetLine, Category, ItemMap
 from .services import StatementError, _compile, find_category, to_dec
 
@@ -161,9 +162,31 @@ def parse_budget(upload, year=None, start=None, end=None):
     raise StatementError("Could not find the Actuals / Budget columns in this workbook.")
 
 
+def sync_defaults():
+    """Make sure the standard report lines exist with their latest keywords (your own edits are kept), and retire
+    lines that were replaced. Safe to run any number of times."""
+    for i, (sec, name, kw) in enumerate(DEFAULTS):
+        cat, made = Category.objects.get_or_create(name=name, section=sec, defaults={"keywords": kw, "order": 10 + i})
+        if not made:
+            have = [k.strip() for k in cat.keywords.split(",") if k.strip()]
+            new = [k for k in (x.strip() for x in kw.split(",")) if k and k.lower() not in [h.lower() for h in have]]
+            if new:
+                cat.keywords = ",".join(have + new)[:300]
+                cat.save(update_fields=["keywords"])
+    for sec, name in RETIRED:
+        cat = Category.objects.filter(name=name, section=sec).first()
+        if cat:
+            if cat.keywords:
+                cat.keywords = ""
+                cat.save(update_fields=["keywords"])
+            BudgetLine.objects.filter(category=cat).update(category=None)  # re-mapped below
+            ItemMap.objects.filter(category=cat).delete()
+
+
 def import_budget(parsed):
     """Store every month that has spending or a planned budget. A month uploaded again replaces the earlier copy.
     Returns the months with actual spending, the months with only a planned budget, and the empty ones."""
+    sync_defaults()
     expense = _compile([c for c in Category.objects.filter(is_active=True) if not c.is_income and c.name not in BANK_ONLY])
     saved = {i.key: i.category for i in ItemMap.objects.select_related("category")}
     done = {"actual": [], "planned": [], "empty": []}
@@ -185,7 +208,8 @@ def import_budget(parsed):
         if cat is not None and cat.name in BANK_ONLY:
             cat = None
         out.append(BudgetLine(category=cat, **l))
-    for y, m in keep:
+    # the file is the latest word on every month it covers, so months it now shows as empty are cleared too
+    for y, m in {(b["year"], b["month"]) for b in parsed["blocks"]}:
         BudgetLine.objects.filter(year=y, month=m).delete()
     BudgetLine.objects.bulk_create(out, batch_size=500)
     for k in done:
@@ -195,6 +219,7 @@ def import_budget(parsed):
 
 def automap_unmapped():
     """Apply the saved choices and the keyword rules to every budget line that has no report line yet."""
+    sync_defaults()
     expense = _compile([c for c in Category.objects.filter(is_active=True) if not c.is_income and c.name not in BANK_ONLY])
     saved = {i.key: i.category for i in ItemMap.objects.select_related("category")}
     cache, changed = {}, []

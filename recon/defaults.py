@@ -28,7 +28,7 @@ DEFAULTS = [
     (EX, "KUCU Care", "kucu care"),
     (EX, "FOCUS STEM Support", "stem"),
     (EX, "FOCUS Tithe", "focus tithe"),
-    (EX, "Repairs and Maintenance", "repair,repairs,maintenance"),
+    (EX, "Repairs and Maintenance", "repair,repairs,maintenance,webhost,web host,web developer,webdeveloper"),
     (EX, "Hospitality", "hospitality"),
     (EX, "Audit fees", "audit"),
     (EX, "Annual mission and mission support", "mission support,annual mission"),
@@ -40,9 +40,7 @@ DEFAULTS = [
     (EX, "Chapel Project Remittances", "chapel"),
     (EX, "Condolences", "condolence,condolences"),
     (EX, "BS Guide purchase", "bs guide,bsguide"),
-    (EX, "Satellite campuses and interim support", "satellite,interim support"),
-    (EX, "Baptism session", "swimming pool,baptism"),
-    (EX, "Decoration expenses", "deco,decoration,decorations"),
+    (EX, "Other expenses", "tuckshop expenses,satellite,interim support,cups,heater,deco,decoration,decorations,swimming pool,wedding,ushering,trivia"),
     (SE, "Anza FYT", "anza"),
     (SE, "African Sunday", "african sunday"),
     (SE, "Worship experience", "worship experience"),
@@ -63,4 +61,10 @@ DEFAULTS = [
     (SE, "Hymnal Night", "hymnal"),
     (SE, "Apologetics", "apologetics"),
     (SE, "Thanksgiving service", "thanks giving,thanksgiving service"),
+    (SE, "Strategic plan launch", "strategic plan"),
 ]
+
+
+# Lines created earlier that the treasurer's list replaced with "Other expenses". They are emptied and their items re-mapped.
+RETIRED = [("out_1_expenses", "Satellite campuses and interim support"), ("out_1_expenses", "Baptism session"),
+           ("out_1_expenses", "Decoration expenses")]
