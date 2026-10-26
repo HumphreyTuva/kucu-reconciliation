@@ -124,8 +124,13 @@ def parse_budget(upload, year=None, start=None, end=None):
                 want_header = True
                 continue
             if want_header:
-                group, want_header = name, False
-                continue
+                carries_figures = any(
+                    (b["col"] < len(r) and _amount(r[b["col"]])) or (b["bcol"] is not None and b["bcol"] < len(r) and _amount(r[b["bcol"]]))
+                    for b in blocks)
+                if not carries_figures:  # a department heading
+                    group, want_header = name, False
+                    continue
+                group, want_header = "", False  # a lone line after a subtotal that has figures, e.g. "Tuckshop expenses"
             for bi, b in enumerate(blocks):
                 a = _amount(r[b["col"]]) if b["col"] < len(r) else Decimal(0)
                 bu = _amount(r[b["bcol"]]) if b["bcol"] is not None and b["bcol"] < len(r) else Decimal(0)
