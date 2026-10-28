@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 import openpyxl
 from openpyxl.utils import get_column_letter as L
 
-from .defaults import DEFAULTS, RETIRED
+from .defaults import DEFAULTS, DROP_KEYWORDS, RETIRED
 from .models import BudgetLine, Category, ItemMap
 from .services import StatementError, _compile, find_category, to_dec
 
@@ -172,6 +172,13 @@ def sync_defaults():
             new = [k for k in (x.strip() for x in kw.split(",")) if k and k.lower() not in [h.lower() for h in have]]
             if new:
                 cat.keywords = ",".join(have + new)[:300]
+                cat.save(update_fields=["keywords"])
+    for name, bad in DROP_KEYWORDS.items():
+        for cat in Category.objects.filter(name=name):
+            have = [k.strip() for k in cat.keywords.split(",") if k.strip()]
+            keep = [k for k in have if k.lower() not in bad]
+            if keep != have:
+                cat.keywords = ",".join(keep)
                 cat.save(update_fields=["keywords"])
     for sec, name in RETIRED:
         cat = Category.objects.filter(name=name, section=sec).first()

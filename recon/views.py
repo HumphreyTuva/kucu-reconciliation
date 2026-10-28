@@ -1,5 +1,6 @@
 import calendar
 import io
+import re
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -13,7 +14,8 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .budget import BANK_ONLY
+from .budget import BANK_ONLY, norm
+from .defaults import OTHER_EXPENSES, statement_sort_key
 from .forms import CategoryFormSet, UploadForm
 from .models import SECTIONS, BudgetLine, Category, FinancialYear, ItemMap, ManualEntry, Statement, Transaction
 from .services import StatementError, categorise, import_statement, parse_statement
@@ -321,7 +323,10 @@ def year_data(period, prior=False):
         in_budget_month |= Q(date__year=yy, date__month=mm)
     # bank fees are never itemised in the workbook, so they still come from the statements
     qs_out = qs.filter(~in_budget_month | Q(category__name__in=BANK_ONLY)) if bud_months else qs
-    amt, uncat, unmapped = defaultdict(lambda: ZERO), 0, 0
+    entered = prior and ManualEntry.objects.filter(Q(period__isnull=True, year=end.year) | Q(period__end__range=(start, end)), section__startswith="out_").exists()
+    if entered:  # audited figures were entered for the comparative year: they replace anything computed
+        qs_out, bud, bud_months = qs.none(), [], []
+    amt, uncat = defaultdict(lambda: ZERO), 0
     for fld, base, prefix, fallback in (("credit", qs, "in_", ("in_3_other", "Other incomes (uncategorised)")),
                                         ("debit", qs_out, "out_", ("out_1_expenses", "Uncategorised expenses"))):
         for r in base.filter(**{fld + "__gt": 0}).values("category__section", "category__name").annotate(t=Sum(fld), n=Count("id")):
@@ -332,17 +337,23 @@ def year_data(period, prior=False):
                 amt[(sec, r["category__name"])] += r["t"]
             else:
                 amt[fallback] += r["t"]; uncat += r["n"]
+    other = {}  # item key -> {"label", "amount", "unassigned"}: what makes up "Other expenses"
     for b in bud:
         if not b.actual:
             continue
         cat = b.category
         if cat and cat.section.startswith("ex_"):
             continue
-        if cat and cat.section.startswith("out_"):
+        if cat and cat.section.startswith("out_") and cat.name != OTHER_EXPENSES:
             amt[(cat.section, cat.name)] += b.actual
-        else:
-            amt[("out_1_expenses", "Other expenses (not yet mapped)")] += b.actual
-            unmapped += 1
+            continue
+        amt[("out_1_expenses", OTHER_EXPENSES)] += b.actual  # chosen as Other expenses, or no report line chosen yet
+        k = norm(b.item)
+        row = other.setdefault(k, {"key": k, "label": re.sub(r"\s+", " ", b.item).strip(), "amount": ZERO, "unassigned": False})
+        row["amount"] += b.actual
+        if cat is None:
+            row["unassigned"] = True
+    unmapped = sum(1 for r in other.values() if r["unassigned"])
     if prior:
         mq = Q(period__isnull=True, year=end.year) | Q(period__end__range=(start, end))
     elif period.defined:
@@ -352,15 +363,15 @@ def year_data(period, prior=False):
     manual = list(ManualEntry.objects.filter(mq))
     for m in manual:
         amt[(m.section, m.label)] += m.amount
-    return amt, uncat, qs.exists() or bool(manual) or bool(bud), bud_months, unmapped
+    return amt, uncat, qs.exists() or bool(manual) or bool(bud), bud_months, unmapped, other
 
 
 def build_report(period):
-    cur, uncat, has_cur, bud_months, unmapped = year_data(period)
+    cur, uncat, has_cur, bud_months, unmapped, other_cur = year_data(period)
     if period.defined:
-        prev, _, has_prev, _, _ = year_data(period.prior(), prior=True)
+        prev, _, has_prev, _, _, other_prev = year_data(period.prior(), prior=True)
     else:
-        prev, has_prev = defaultdict(lambda: ZERO), False
+        prev, has_prev, other_prev = defaultdict(lambda: ZERO), False, {}
 
     def rows(sec):
         names = [c.name for c in Category.objects.filter(section=sec)]
@@ -372,8 +383,14 @@ def build_report(period):
     S = {k: rows(k) for k, _ in SECTIONS}
     row = lambda label, k, note=None: {"label": label, "note": note, "cur": S[k][1], "prev": S[k][2]}
     income = [row("Tithes and Offering", "in_1_tithes_offering", 5), row("Income from projects", "in_2_projects", 5), row("Other income", "in_3_other", 5)]
-    expenses = [{"label": r["label"], "cur": r["cur"], "prev": r["prev"]} for r in S["out_1_expenses"][0]]
+    expenses = [{"label": r["label"], "cur": r["cur"], "prev": r["prev"], "note": 7 if r["label"] == OTHER_EXPENSES else None}
+                for r in S["out_1_expenses"][0]]
+    keys = list(other_cur) + [k for k in other_prev if k not in other_cur]
+    note7 = [{"label": (other_cur.get(k) or other_prev[k])["label"], "cur": other_cur[k]["amount"] if k in other_cur else ZERO,
+              "prev": other_prev[k]["amount"] if k in other_prev else ZERO, "unassigned": bool(other_cur.get(k, {}).get("unassigned"))} for k in keys]
+    note7.sort(key=lambda r: (-r["cur"], -r["prev"], r["label"].lower()))
     expenses.append(row("Special events", "out_2_special_events", 6))
+    expenses.sort(key=lambda r: statement_sort_key(r["label"]))  # same order as the printed accounts
     tot = lambda rs, f: sum((r[f] for r in rs), ZERO)
     ti, te = {f: tot(income, f) for f in ("cur", "prev")}, {f: tot(expenses, f) for f in ("cur", "prev")}
     return {
@@ -382,7 +399,8 @@ def build_report(period):
         "surplus": {f: ti[f] - te[f] for f in ("cur", "prev")},
         "note5": [(title, S[k]) for title, k in (("Tithes and Offering", "in_1_tithes_offering"),
                                                   ("Net proceeds from projects", "in_2_projects"), ("Other income", "in_3_other"))],
-        "note6": S["out_2_special_events"], "uncat": uncat, "has_data": has_cur, "has_prev": has_prev,
+        "note6": S["out_2_special_events"], "note7": note7,
+        "note7_total": {"cur": sum((r["cur"] for r in note7), ZERO), "prev": sum((r["prev"] for r in note7), ZERO)}, "uncat": uncat, "has_data": has_cur, "has_prev": has_prev,
         "budget_months": ", ".join(f"{calendar.month_abbr[m]} {yy}" for yy, m in bud_months), "unmapped": unmapped,
     }
 
@@ -445,6 +463,11 @@ def report_export(request):
     for x in r["note6"][0]:
         nrow(x["label"], x["cur"], x["prev"])
     nrow("Total special events", r["note6"][1], r["note6"][2])
+    if r["note7"]:
+        notes.append([]); notes.append(["NOTE 7 - OTHER EXPENSES"])
+        for x in r["note7"]:
+            nrow(x["label"], x["cur"], x["prev"])
+        nrow("Total other expenses", r["note7_total"]["cur"], r["note7_total"]["prev"])
     notes.column_dimensions["A"].width = 52
     for rw in notes.iter_rows(min_col=3, max_col=4):
         for cell in rw:
@@ -559,7 +582,15 @@ def budget(request):
                     tot["spent_cmp"] += actual_m
                     tot["budget_cmp"] += budget_m
     unmapped = BudgetLine.objects.filter(category__isnull=True).values("item").distinct().count()
-    return render(request, "recon/budget.html", {
+    other = {}
+    for b in BudgetLine.objects.filter(period.month_filter(), actual__gt=0).select_related("category"):
+        if b.category is None or b.category.name == OTHER_EXPENSES:
+            k = norm(b.item)
+            o = other.setdefault(k, {"label": re.sub(r"\s+", " ", b.item).strip(), "amount": ZERO, "unassigned": False})
+            o["amount"] += b.actual
+            o["unassigned"] = o["unassigned"] or b.category is None
+    other_items = sorted(other.values(), key=lambda o: (-o["amount"], o["label"].lower()))
+    return render(request, "recon/budget.html", {"other_items": other_items, "other_total": sum((o["amount"] for o in other_items), ZERO),
         "period": period, "p": period.id, "fys": fys, "rows": rows, "tot": tot, "has_lines": has_lines,
         "diff": tot["budget_cmp"] - tot["spent_cmp"], "remaining": tot["planned"],
         "months_spent": sum(1 for r in rows if r["status"] == "actual"), "unmapped": unmapped})
@@ -674,3 +705,19 @@ def budget_automap(request):
     messages.success(request, f"{n} budget line{'s were' if n != 1 else ' was'} matched to a report line." if n else
                               "Nothing new could be matched automatically. Choose the report line yourself for the rest.")
     return redirect("budget_mapping")
+
+
+@login_required
+def expense_export(request):
+    """Download the statement of actual expenses for the chosen period as PDF or Excel."""
+    from .expense_statement import build, to_pdf, to_xlsx
+    period, _ = resolve_period(request)
+    data = build(period)
+    name = f"KUCU-expense-statement-{period.end:%Y%m%d}"
+    if request.GET.get("format") == "xlsx":
+        resp = HttpResponse(to_xlsx(data), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        resp["Content-Disposition"] = f'attachment; filename="{name}.xlsx"'
+    else:
+        resp = HttpResponse(to_pdf(data), content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{name}.pdf"'
+    return resp

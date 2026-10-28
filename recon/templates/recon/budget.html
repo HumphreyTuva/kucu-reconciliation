@@ -15,6 +15,7 @@
 {% if has_lines %}
 <div class="head noprint"><div><h2>{{ period.name }}</h2><span class="chip">{{ period.start|date:"j M Y" }} – {{ period.end|date:"j M Y" }}</span></div>
 <div class="actions"><form method="get" class="yr"><select name="p" onchange="this.form.submit()" aria-label="Period">{% for f in fys %}<option value="{{ f.id }}" {% if f.id|stringformat:"s" == p %}selected{% endif %}>{{ f.label }}</option>{% endfor %}<option value="all" {% if p == 'all' %}selected{% endif %}>All data</option></select></form>
+<a class="btn ghost" href="{% url 'expense_export' %}?p={{ p }}&format=pdf">Expense statement (PDF)</a><a class="btn ghost" href="{% url 'expense_export' %}?p={{ p }}&format=xlsx">Excel</a>
 <a class="btn ghost" href="{% url 'periods' %}">Financial years</a>
 <a class="btn ghost" href="{% url 'budget_mapping' %}{% if unmapped %}?show=unmapped{% endif %}">Map items to report lines{% if unmapped %} ({{ unmapped }} to check){% endif %}</a></div></div>
 
@@ -36,5 +37,9 @@
 <p class="small mute" style="margin:10px 0 0">&ldquo;Money out of bank&rdquo; is the debits on your uploaded bank statements for that month. It can differ from actual spending because of petty cash, transfers and timing. Totals add up the individual expense lines, not the workbook&rsquo;s own subtotal rows. Over/under compares only months that have both spending and a budget.</p></div>
 <form method="post" action="{% url 'budget_delete' %}" class="noprint" onsubmit="return confirm('Delete the budget lines for {{ period.name }}? You can import the workbook again afterwards.')">{% csrf_token %}<input type="hidden" name="scope" value="period"><input type="hidden" name="p" value="{{ p }}">
 <button class="ghost danger">Delete the budget data for {{ period.name }}</button> <span class="small mute">You can also manage individual lines in the Admin under &ldquo;Budget lines&rdquo;.</span></form>
+{% if other_items %}<div class="card" id="other"><div class="hd"><h2>Other expenses</h2><span class="mute small">Items without a report line of their own</span></div>
+<div class="scroll"><table class="ft"><tbody>{% for o in other_items %}<tr><td>{{ o.label }}{% if o.unassigned %} <span class="mute small noprint">· not yet assigned a line</span>{% endif %}</td><td class="n">{{ o.amount|kes }}</td></tr>{% endfor %}
+<tr class="tot"><td>Total</td><td class="n">{{ other_total|kes }}</td></tr></tbody></table></div>
+<p class="small mute" style="margin:10px 0 0">These are counted under &ldquo;Other expenses&rdquo; in the annual report (Note 7). To give an item a line of its own, use <a href="{% url 'budget_mapping' %}?show=unmapped">Map items to report lines</a>.</p></div>{% endif %}
 {% else %}<div class="card empty"><p><b>No budget uploaded yet.</b></p><p>Choose your budget workbook above to get started.</p></div>{% endif %}
 {% endblock %}

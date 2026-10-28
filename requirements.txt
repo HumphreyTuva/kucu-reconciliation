@@ -4,3 +4,4 @@ pdfplumber>=0.11
 cryptography>=42
 msoffcrypto-tool>=5.4
 pypdfium2>=4.30
+reportlab>=4.0

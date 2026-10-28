@@ -2,13 +2,13 @@
 {% block content %}
 <div class="head noprint"><div><h1>Annual financial report</h1><p class="sub">Built automatically from everything you have uploaded, for the dates you choose. <a href="{% url 'periods' %}">Set your financial year</a>.</p></div>
 {% if has_any %}<div class="actions"><form method="get" class="yr"><label for="pp" class="small mute">Period</label><select id="pp" name="p" onchange="this.form.submit()">{% for f in fys %}<option value="{{ f.id }}" {% if f.id|stringformat:"s" == p %}selected{% endif %}>{{ f.label }}</option>{% endfor %}<option value="all" {% if p == 'all' %}selected{% endif %}>All data ({{ period.start|date:"M Y" }} – {{ period.end|date:"M Y" }})</option></select></form>
-<a class="btn" href="{% url 'report_export' %}?p={{ p }}">Download Excel</a><button class="ghost" onclick="window.print()">Print</button></div>{% endif %}</div>
+<a class="btn" href="{% url 'report_export' %}?p={{ p }}">Download Excel</a><a class="btn ghost" href="{% url 'expense_export' %}?p={{ p }}&format=pdf">Expense statement (PDF)</a><a class="btn ghost" href="{% url 'expense_export' %}?p={{ p }}&format=xlsx">Excel</a><button class="ghost" onclick="window.print()">Print</button></div>{% endif %}</div>
 
 {% if not has_any %}<div class="card empty"><p><b>No data yet.</b></p><p>Upload your bank statements and the report builds itself.</p><a class="btn" href="{% url 'home' %}">Upload a statement</a></div>
 {% else %}
 {% if uncat %}<div class="msg warning noprint">{{ uncat }} transaction{{ uncat|pluralize }} in this period {{ uncat|pluralize:"has,have" }} no category and {{ uncat|pluralize:"is,are" }} shown as “Other incomes (uncategorised)” or “Uncategorised expenses”. Open the statements and assign them for an exact report.</div>{% endif %}
 {% if budget_months %}<div class="msg noprint"><b>Expenses for {{ budget_months }}</b> come from the budget workbook (actual spending, item by item). Other months use bank transactions.
-{% if unmapped %}{{ unmapped }} budget line{{ unmapped|pluralize }} {{ unmapped|pluralize:"is,are" }} not yet matched to a report line. <a href="{% url 'budget_mapping' %}">Map them</a> for an exact report.{% endif %}</div>{% endif %}
+{% if unmapped %}{{ unmapped }} budget item{{ unmapped|pluralize }} {{ unmapped|pluralize:"has,have" }} no report line yet and {{ unmapped|pluralize:"is,are" }} counted under Other expenses (Note 7). <a href="{% url 'budget_mapping' %}?show=unmapped">Choose a line</a> for a more exact report.{% endif %}</div>{% endif %}
 <div class="msg noprint">This report is built from bank transactions (cash basis). Items that never touch the bank, such as <b>depreciation</b> or <b>tuck shop net proceeds</b>, can be added
 {% if user.is_staff %}<a href="{% url 'admin:recon_manualentry_add' %}">as manual entries</a>{% else %}as manual entries by an administrator{% endif %}.</div>
 
@@ -37,5 +37,11 @@
 {% for r in note6.0 %}<tr><td>{{ r.label }}</td><td class="n">{{ r.cur|kes }}</td>{% if has_prev %}<td class="n">{{ r.prev|kes }}</td>{% endif %}</tr>{% empty %}<tr><td class="mute" colspan="3">No special event spending recorded.</td></tr>{% endfor %}
 <tr class="tot"><td>Total</td><td class="n">{{ note6.1|kes }}</td>{% if has_prev %}<td class="n">{{ note6.2|kes }}</td>{% endif %}</tr>
 </tbody></table></div>
+
+{% if note7 %}<h2 class="gap">Note 7 – Other expenses</h2>
+<div class="scroll"><table class="ft"><tbody>
+{% for r in note7 %}<tr><td>{{ r.label }}{% if r.unassigned %} <span class="mute small noprint">· not yet assigned a line</span>{% endif %}</td><td class="n">{{ r.cur|kes }}</td>{% if has_prev %}<td class="n">{{ r.prev|kes }}</td>{% endif %}</tr>{% endfor %}
+<tr class="tot"><td>Total</td><td class="n">{{ note7_total.cur|kes }}</td>{% if has_prev %}<td class="n">{{ note7_total.prev|kes }}</td>{% endif %}</tr>
+</tbody></table></div>{% endif %}
 </article>{% endif %}
 {% endblock %}

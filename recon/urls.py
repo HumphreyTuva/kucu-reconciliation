@@ -20,6 +20,7 @@ urlpatterns = [
     path("budget/mapping/auto/", views.budget_automap, name="budget_automap"),
     path("budget/<int:year>/<int:month>/", views.budget_month, name="budget_month"),
     path("periods/", views.periods, name="periods"),
+    path("expenses/export/", views.expense_export, name="expense_export"),
     path("report/", views.report, name="report"),
     path("report/export/", views.report_export, name="report_export"),
 ]

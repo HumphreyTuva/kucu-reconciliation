@@ -1,4 +1,5 @@
 """Default categories, modelled on KUCU's annual financial statements (notes 5 and 6)."""
+OTHER_EXPENSES = "Other expenses"  # the catch-all report line, with its own breakdown (Note 7)
 TO, PR, OI, EX, SE = "in_1_tithes_offering", "in_2_projects", "in_3_other", "out_1_expenses", "out_2_special_events"
 
 # (section, name, keywords). Offering is listed before Tithe on purpose: a payment
@@ -20,8 +21,8 @@ DEFAULTS = [
     (OI, "BS", "bs,bs guide,bsguide"),
     (OI, "Bible", "bible"),
     (EX, "Transport", "transport,fare,fuel"),
-    (EX, "Stationery, Photocopying & typesetting", "stationery,stationaries,stationary,office supplies,suplies,photocopy,photocopying,printing,typesetting,binding"),
-    (EX, "Speakers appreciation", "speaker,speakers,appreciation"),
+    (EX, "Stationery, Photocopying & typesetting", "stationery,stationaries,stationary,office supplies,suplies,photocopy,photocopying,printing,typesetting,book binding"),
+    (EX, "Speakers appreciation", "appreciation,appreciations"),
     (EX, "Correspondences", "correspondence,correspondences,airtime"),
     (EX, "Refreshments", "refreshment,refreshments"),
     (EX, "AGM expenses", "agm"),
@@ -68,3 +69,25 @@ DEFAULTS = [
 # Lines created earlier that the treasurer's list replaced with "Other expenses". They are emptied and their items re-mapped.
 RETIRED = [("out_1_expenses", "Satellite campuses and interim support"), ("out_1_expenses", "Baptism session"),
            ("out_1_expenses", "Decoration expenses")]
+
+
+# Keywords that caused wrong matches ("Cm Speaker Repair" is a repair; "bonding" is not "binding") and are removed from existing installs.
+DROP_KEYWORDS = {"Speakers appreciation": ["speaker", "speakers"], "Stationery, Photocopying & typesetting": ["binding"]}
+
+# Order of the expense lines, as in the printed annual accounts. Anything else follows, then Other expenses and Uncategorised last.
+STATEMENT_ORDER = ["transport", "stationery, photocopying & typesetting", "speakers appreciation", "correspondences", "refreshments",
+                   "depreciation", "special events", "agm expenses", "kucu care", "focus stem support", "focus tithe",
+                   "repairs and maintenance", "hospitality", "audit fees", "annual mission and mission support",
+                   "executive programming", "gifts", "bank service charges", "training and retreats",
+                   "computer & internet expenses", "chapel project remittances", "condolences"]
+
+
+def statement_sort_key(label):
+    l = label.strip().lower()
+    if l in STATEMENT_ORDER:
+        return (0, STATEMENT_ORDER.index(l))
+    if l == "other expenses":
+        return (2, 0)
+    if l in ("uncategorised expenses", "other expenses (not yet mapped)"):
+        return (3, 0)
+    return (1, 0)
